@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - PoolManager</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container">
+      <div class="logo">🏊 PoolManager</div>
+      <ul class="nav-links">
+        <li><span class="user-name"></span></li>
+        <li><button class="btn btn-danger" onclick="logout()">Logout</button></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="dashboard">
+    <div class="container">
+      <h1>Dashboard</h1>
+
+      <!-- Section 1: Family Members -->
+      <section class="card">
+        <h2>👨‍👩‍👧‍👦 Family Members</h2>
+        <button class="btn btn-primary" onclick="toggleAddMember()">+ Add Family Member</button>
+
+        <div id="addMemberForm" class="form-section hidden">
+          <form id="familyForm">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="memberName">Name</label>
+                <input type="text" id="memberName" required>
+              </div>
+              <div class="form-group">
+                <label for="memberDOB">Date of Birth</label>
+                <input type="date" id="memberDOB" required>
+              </div>
+              <div class="form-group">
+                <label for="memberPhoto">Photo</label>
+                <input type="file" id="memberPhoto" accept="image/*">
+              </div>
+              <button type="submit" class="btn btn-success">Add Member</button>
+            </div>
+          </form>
+          <div id="memberMessage" class="message"></div>
+        </div>
+
+        <div id="familyList" class="family-list"></div>
+      </section>
+
+      <!-- Section 2: Subscribe to Plans -->
+      <section class="card">
+        <h2>📋 Subscribe to Plans</h2>
+        <div class="subscribe-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="selectMember">Select Family Member</label>
+              <select id="selectMember" required>
+                <option value="">-- Choose a member --</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="selectPlan">Select Plan</label>
+              <select id="selectPlan" required>
+                <option value="">-- Choose a plan --</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Price</label>
+              <input type="text" id="priceDisplay" readonly placeholder="₹0">
+            </div>
+            <button type="button" class="btn btn-success" onclick="initiatePayment()">Subscribe Now</button>
+          </div>
+        </div>
+        <div id="subscriptionMessage" class="message"></div>
+      </section>
+
+      <!-- Section 3: My QR Codes -->
+      <section class="card">
+        <h2>🔲 My QR Codes</h2>
+        <button class="btn btn-secondary" onclick="loadQRCodes()">Refresh QR Codes</button>
+        <div id="qrList" class="qr-list"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const API_URL = '';
+    let selectedMemberId = null;
+    let selectedPlanId = null;
+    let memberAge = 0;
+
+    // Check authentication
+    if (!localStorage.getItem('token')) {
+      window.location.href = 'login.html';
+    }
+
+    const user = JSON.parse(localStorage.getItem('user'));
+    document.querySelector('.user-name').textContent = `👤 ${user.name}`;
+
+    // Load family members and plans on page load
+    loadFamilyMembers();
+    loadPlans();
+    loadQRCodes();
+
+    // Event listeners
+    document.getElementById('familyForm').addEventListener('submit', addFamilyMember);
+    document.getElementById('selectMember').addEventListener('change', calculatePrice);
+    document.getElementById('selectPlan').addEventListener('change', calculatePrice);
+
+    function toggleAddMember() {
+      const form = document.getElementById('addMemberForm');
+      form.classList.toggle('hidden');
+    }
+
+    async function loadFamilyMembers() {
+      try {
+        const response = await fetch(`${API_URL}/api/family-members`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+
+        const members = await response.json();
+        
+        // Populate dropdown
+        const select = document.getElementById('selectMember');
+        select.innerHTML = '<option value="">-- Choose a member --</option>';
+        members.forEach(member => {
+          const option = document.createElement('option');
+          option.value = member.id;
+          option.textContent = `${member.name} (${getAge(member.date_of_birth)} yrs)`;
+          select.appendChild(option);
+        });
+
+        // Display family list
+        const familyList = document.getElementById('familyList');
+        familyList.innerHTML = members.map(member => `
+          <div class="family-card">
+            <img src="${member.photo_path || 'https://via.placeholder.com/100'}" alt="${member.name}">
+            <h3>${member.name}</h3>
+            <p>Age: ${getAge(member.date_of_birth)} years</p>
+            <p>DOB: ${new Date(member.date_of_birth).toLocaleDateString()}</p>
+          </div>
+        `).join('');
+
+        if (members.length === 0) {
+          familyList.innerHTML = '<p class="empty-state">No family members added. Add one to get started!</p>';
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function addFamilyMember(e) {
+      e.preventDefault();
+
+      const formData = new FormData();
+      formData.append('name', document.getElementById('memberName').value);
+      formData.append('date_of_birth', document.getElementById('memberDOB').value);
+      if (document.getElementById('memberPhoto').files[0]) {
+        formData.append('photo', document.getElementById('memberPhoto').files[0]);
+      }
+
+      try {
+        const response = await fetch(`${API_URL}/api/family-members`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          document.getElementById('memberMessage').innerHTML = '<div class="alert alert-success">Family member added successfully!</div>';
+          document.getElementById('familyForm').reset();
+          toggleAddMember();
+          loadFamilyMembers();
+          setTimeout(() => {
+            document.getElementById('memberMessage').innerHTML = '';
+          }, 3000);
+        } else {
+          document.getElementById('memberMessage').innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+        }
+      } catch (err) {
+        console.error(err);
+        document.getElementById('memberMessage').innerHTML = '<div class="alert alert-error">Failed to add family member</div>';
+      }
+    }
+
+    async function loadPlans() {
+      try {
+        const response = await fetch(`${API_URL}/api/plans`);
+        const plans = await response.json();
+
+        const select = document.getElementById('selectPlan');
+        select.innerHTML = '<option value="">-- Choose a plan --</option>';
+        plans.forEach(plan => {
+          const option = document.createElement('option');
+          option.value = plan.id;
+          option.textContent = `${plan.name}`;
+          select.appendChild(option);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function calculatePrice() {
+      const memberId = document.getElementById('selectMember').value;
+      const planId = document.getElementById('selectPlan').value;
+
+      if (!memberId || !planId) {
+        document.getElementById('priceDisplay').value = '₹0';
+        return;
+      }
+
+      try {
+        const membersRes = await fetch(`${API_URL}/api/family-members`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const members = await membersRes.json();
+        const member = members.find(m => m.id == memberId);
+
+        const plansRes = await fetch(`${API_URL}/api/plans`);
+        const plans = await plansRes.json();
+        const plan = plans.find(p => p.id == planId);
+
+        const age = getAge(member.date_of_birth);
+        memberAge = age;
+        selectedMemberId = memberId;
+        selectedPlanId = planId;
+
+        let price;
+        if (age < 12) price = plan.child_price;
+        else if (age >= 60) price = plan.senior_price;
+        else price = plan.adult_price;
+
+        document.getElementById('priceDisplay').value = `₹${price}`;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function initiatePayment() {
+      if (!selectedMemberId || !selectedPlanId) {
+        document.getElementById('subscriptionMessage').innerHTML = '<div class="alert alert-error">Please select a member and plan</div>';
+        return;
+      }
+
+      try {
+        // Create order
+        const response = await fetch(`${API_URL}/api/create-order`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({
+            family_member_id: selectedMemberId,
+            plan_id: selectedPlanId
+          })
+        });
+
+        const orderData = await response.json();
+
+        if (!response.ok) {
+          document.getElementById('subscriptionMessage').innerHTML = `<div class="alert alert-error">${orderData.error}</div>`;
+          return;
+        }
+
+        // Open Razorpay checkout
+        const options = {
+          key: 'rzp_test_1DP5MMOk92gagR', // Replace with actual key
+          amount: orderData.amount * 100,
+          currency: 'INR',
+          name: 'Swimming Pool',
+          description: `${orderData.memberName} - ${orderData.planName}`,
+          order_id: orderData.orderId,
+          handler: function(response) {
+            verifyPayment(response, selectedMemberId, selectedPlanId);
+          },
+          prefill: {
+            name: user.name,
+            email: user.email
+          }
+        };
+
+        const rzp = new Razorpay(options);
+        rzp.open();
+      } catch (err) {
+        console.error(err);
+        document.getElementById('subscriptionMessage').innerHTML = '<div class="alert alert-error">Failed to initiate payment</div>';
+      }
+    }
+
+    async function verifyPayment(response, memberId, planId) {
+      try {
+        const verifyResponse = await fetch(`${API_URL}/api/verify-payment`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+            family_member_id: memberId,
+            plan_id: planId
+          })
+        });
+
+        const data = await verifyResponse.json();
+
+        if (verifyResponse.ok) {
+          // Show QR code
+          document.getElementById('subscriptionMessage').innerHTML = `
+            <div class="alert alert-success">payment successful! QR Code generated.</div>
+            <div style="text-align: center; padding: 20px;">
+              <img src="${data.qrCode}" alt="QR Code" style="max-width: 300px;">
+              <p style="margin-top: 10px; font-size: 12px; color: #666;">
+                Token: ${data.qrToken.substring(0, 12)}...
+              </p>
+            </div>
+          `;
+          loadQRCodes();
+          calculatePrice();
+          setTimeout(() => {
+            document.getElementById('subscriptionMessage').innerHTML = '';
+          }, 10000);
+        } else {
+          document.getElementById('subscriptionMessage').innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+        }
+      } catch (err) {
+        console.error(err);
+        document.getElementById('subscriptionMessage').innerHTML = '<div class="alert alert-error">Payment verification failed</div>';
+      }
+    }
+
+    async function loadQRCodes() {
+      try {
+        const response = await fetch(`${API_URL}/api/my-qrcodes`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+
+        const qrcodes = await response.json();
+        const qrList = document.getElementById('qrList');
+
+        if (qrcodes.length === 0) {
+          qrList.innerHTML = '<p class="empty-state">No active QR codes. Subscribe to a plan to get one!</p>';
+          return;
+        }
+
+        qrList.innerHTML = qrcodes.map(qr => {
+          const expiryDate = new Date(qr.expires_at);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const isExpired = expiryDate < today;
+          const daysLeft = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+          const status = isExpired ? 'expired' : 'active';
+          
+          return `
+            <div class="qr-card ${status}">
+              <div class="qr-card-header">
+                <img src="${qr.member_name && qr.photo_path ? qr.photo_path : 'https://via.placeholder.com/80'}" alt="${qr.member_name}" class="member-photo">
+                <div class="member-info">
+                  <h3>${qr.member_name}</h3>
+                  <p><strong>Plan:</strong> ${qr.plan_name}</p>
+                </div>
+                ${isExpired ? '<p class="expired-badge">EXPIRED</p>' : `<p class="active-badge">${daysLeft} days left</p>`}
+              </div>
+              <div class="qr-code-container">
+                <img src="${qr.qrImage}" alt="QR Code" class="qr-image">
+              </div>
+              <p class="qr-expiry"><strong>Expires:</strong> ${expiryDate.toLocaleDateString()}</p>
+              ${isExpired ? `<button class="btn btn-warning btn-block" onclick="renewSubscription(${qr.id}, '${qr.member_name}')">🔄 Renew Membership</button>` : ''}
+            </div>
+          `;
+        }).join('');
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function renewSubscription(subscriptionId, memberName) {
+      alert(`Renew functionality for ${memberName} will be implemented. For now, please subscribe again with a new plan.`);
+      // This would redirect to subscribe section or show renewal options
+    }
+
+    function getAge(dob) {
+      const birthDate = new Date(dob);
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      
+      return age;
+    }
+
+    function logout() {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = 'login.html';
+    }
+  </script>
+</body>
+</html>
