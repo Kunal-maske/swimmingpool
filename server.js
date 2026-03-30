@@ -37,6 +37,7 @@ if (isMockMode) {
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(express.static("public"));
+app.use("/uploads", express.static("uploads"));
 
 // Create uploads directory if it doesn't exist
 if (!fs.existsSync("uploads")) {
