@@ -1,19 +1,19 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const bcrypt = require('bcrypt');
+const sqlite3 = require("sqlite3").verbose();
+const path = require("path");
+const bcrypt = require("bcrypt");
 
-const dbPath = path.join(__dirname, 'pool.db');
+const dbPath = path.join(__dirname, "pool.db");
 
 // Promisify database operations
 class Database {
   constructor(filename) {
     this.db = new sqlite3.Database(filename);
-    this.db.run('PRAGMA foreign_keys = ON');
+    this.db.run("PRAGMA foreign_keys = ON");
   }
 
   run(sql, params = []) {
     return new Promise((resolve, reject) => {
-      this.db.run(sql, params, function(err) {
+      this.db.run(sql, params, function (err) {
         if (err) reject(err);
         else resolve({ lastID: this.lastID, changes: this.changes });
       });
@@ -118,39 +118,66 @@ async function initializeDatabase() {
     `);
 
     // Check if plans exist
-    const plansExist = await db.get('SELECT COUNT(*) as count FROM Plans');
-    
+    const plansExist = await db.get("SELECT COUNT(*) as count FROM Plans");
+
     if (plansExist.count === 0) {
       // Seed plans
       const plans = [
-        { name: 'One Day', child_price: 50, adult_price: 100, senior_price: 80, duration_days: 1 },
-        { name: 'Monthly', child_price: 500, adult_price: 1000, senior_price: 800, duration_days: 30 },
-        { name: 'Annual', child_price: 5000, adult_price: 10000, senior_price: 8000, duration_days: 365 }
+        {
+          name: "One Day",
+          child_price: 50,
+          adult_price: 100,
+          senior_price: 80,
+          duration_days: 1,
+        },
+        {
+          name: "Monthly",
+          child_price: 500,
+          adult_price: 1000,
+          senior_price: 800,
+          duration_days: 30,
+        },
+        {
+          name: "Annual",
+          child_price: 5000,
+          adult_price: 10000,
+          senior_price: 8000,
+          duration_days: 365,
+        },
       ];
 
       for (const plan of plans) {
         await db.run(
-          'INSERT INTO Plans (name, child_price, adult_price, senior_price, duration_days) VALUES (?, ?, ?, ?, ?)',
-          [plan.name, plan.child_price, plan.adult_price, plan.senior_price, plan.duration_days]
+          "INSERT INTO Plans (name, child_price, adult_price, senior_price, duration_days) VALUES (?, ?, ?, ?, ?)",
+          [
+            plan.name,
+            plan.child_price,
+            plan.adult_price,
+            plan.senior_price,
+            plan.duration_days,
+          ],
         );
       }
     }
 
     // Check if admin user exists
-    const adminExists = await db.get("SELECT COUNT(*) as count FROM Users WHERE email = ?", ['admin@pool.com']);
-    
+    const adminExists = await db.get(
+      "SELECT COUNT(*) as count FROM Users WHERE email = ?",
+      ["admin@pool.com"],
+    );
+
     if (adminExists.count === 0) {
       // Create admin user
-      const hashedPassword = bcrypt.hashSync('admin123', 10);
+      const hashedPassword = bcrypt.hashSync("admin123", 10);
       await db.run(
-        'INSERT INTO Users (name, email, password_hash, phone, role) VALUES (?, ?, ?, ?, ?)',
-        ['Admin', 'admin@pool.com', hashedPassword, '9999999999', 'admin']
+        "INSERT INTO Users (name, email, password_hash, phone, role) VALUES (?, ?, ?, ?, ?)",
+        ["Admin", "admin@pool.com", hashedPassword, "9999999999", "admin"],
       );
     }
 
-    console.log('✓ Database initialized successfully');
+    console.log("✓ Database initialized successfully");
   } catch (err) {
-    console.error('Database initialization error:', err);
+    console.error("Database initialization error:", err);
   }
 }
 

@@ -1,291 +1,346 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Panel - PoolManager</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <nav class="navbar">
-    <div class="container">
-      <div class="logo">🏊 PoolManager</div>
-      <ul class="nav-links">
-        <li><span class="user-name"></span></li>
-        <li><button class="btn btn-danger" onclick="logout()">Logout</button></li>
-      </ul>
-    </div>
-  </nav>
-
-  <main class="admin-panel">
-    <div class="container">
-      <h1>🔐 Admin Panel</h1>
-
-      <div class="admin-tabs">
-        <button class="tab-btn active" onclick="switchTab('scanner')">📱 QR Scanner</button>
-        <button class="tab-btn" onclick="switchTab('users')">👤 Registered Users</button>
-        <button class="tab-btn" onclick="switchTab('members')">👥 Members & Subscriptions</button>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Panel - PoolManager</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="container">
+        <div class="logo">🏊 PoolManager</div>
+        <ul class="nav-links">
+          <li><span class="user-name"></span></li>
+          <li>
+            <button class="btn btn-danger" onclick="logout()">Logout</button>
+          </li>
+        </ul>
       </div>
+    </nav>
 
-      <!-- Scanner Tab -->
-      <div id="scanner-tab" class="tab-content active">
-        <section class="card">
-          <h2>QR Code Scanner</h2>
-          
-          <div id="libraryStatus" class="message"></div>
-          
-          <div class="scanner-controls">
-            <button type="button" class="btn btn-primary" onclick="startScanner()" id="startBtn">Start Scanner</button>
-            <button type="button" class="btn btn-danger" onclick="stopScanner()" id="stopBtn" disabled>Stop Scanner</button>
-          </div>
+    <main class="admin-panel">
+      <div class="container">
+        <h1>🔐 Admin Panel</h1>
 
-          <div id="reader" style="display: none; margin: 20px 0; width: 100%; max-width: 500px; margin-left: auto; margin-right: auto;"></div>
-          
-          <div id="scanResult" class="scan-result hidden"></div>
-        </section>
+        <div class="admin-tabs">
+          <button class="tab-btn active" onclick="switchTab('scanner')">
+            📱 QR Scanner
+          </button>
+          <button class="tab-btn" onclick="switchTab('users')">
+            👤 Registered Users
+          </button>
+          <button class="tab-btn" onclick="switchTab('members')">
+            👥 Members & Subscriptions
+          </button>
+        </div>
 
-        <section class="card">
-          <h2>Recent Scans</h2>
-          <div id="scanHistory" class="scan-history"></div>
-        </section>
+        <!-- Scanner Tab -->
+        <div id="scanner-tab" class="tab-content active">
+          <section class="card">
+            <h2>QR Code Scanner</h2>
+
+            <div id="libraryStatus" class="message"></div>
+
+            <div class="scanner-controls">
+              <button
+                type="button"
+                class="btn btn-primary"
+                onclick="startScanner()"
+                id="startBtn"
+              >
+                Start Scanner
+              </button>
+              <button
+                type="button"
+                class="btn btn-danger"
+                onclick="stopScanner()"
+                id="stopBtn"
+                disabled
+              >
+                Stop Scanner
+              </button>
+            </div>
+
+            <div
+              id="reader"
+              style="
+                display: none;
+                margin: 20px 0;
+                width: 100%;
+                max-width: 500px;
+                margin-left: auto;
+                margin-right: auto;
+              "
+            ></div>
+
+            <div id="scanResult" class="scan-result hidden"></div>
+          </section>
+
+          <section class="card">
+            <h2>Recent Scans</h2>
+            <div id="scanHistory" class="scan-history"></div>
+          </section>
+        </div>
+
+        <!-- Members Tab -->
+        <div id="members-tab" class="tab-content">
+          <section class="card">
+            <h2>👥 Members & Active Subscriptions</h2>
+            <button class="btn btn-secondary" onclick="loadMembersTable()">
+              Refresh
+            </button>
+            <div class="table-wrapper">
+              <table class="members-table">
+                <thead>
+                  <tr>
+                    <th>Photo</th>
+                    <th>Member Name</th>
+                    <th>Age</th>
+                    <th>User</th>
+                    <th>Plan</th>
+                    <th>Start Date</th>
+                    <th>Expiry Date</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="membersTableBody">
+                  <tr>
+                    <td colspan="8" style="text-align: center">Loading...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <!-- Users Tab -->
+        <div id="users-tab" class="tab-content">
+          <section class="card">
+            <h2>👤 Registered Users</h2>
+            <button class="btn btn-secondary" onclick="loadUsersTable()">
+              Refresh
+            </button>
+            <div class="table-wrapper">
+              <table class="members-table">
+                <thead>
+                  <tr>
+                    <th>Photo</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Role</th>
+                    <th>Registered On</th>
+                  </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                  <tr>
+                    <td colspan="6" style="text-align: center">Loading...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
       </div>
+    </main>
 
-      <!-- Members Tab -->
-      <div id="members-tab" class="tab-content">
-        <section class="card">
-          <h2>👥 Members & Active Subscriptions</h2>
-          <button class="btn btn-secondary" onclick="loadMembersTable()">Refresh</button>
-          <div class="table-wrapper">
-            <table class="members-table">
-              <thead>
-                <tr>
-                  <th>Photo</th>
-                  <th>Member Name</th>
-                  <th>Age</th>
-                  <th>User</th>
-                  <th>Plan</th>
-                  <th>Start Date</th>
-                  <th>Expiry Date</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="membersTableBody">
-                <tr><td colspan="8" style="text-align: center;">Loading...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
+    <script src="https://unpkg.com/html5-qrcode"></script>
 
-      <!-- Users Tab -->
-      <div id="users-tab" class="tab-content">
-        <section class="card">
-          <h2>👤 Registered Users</h2>
-          <button class="btn btn-secondary" onclick="loadUsersTable()">Refresh</button>
-          <div class="table-wrapper">
-            <table class="members-table">
-              <thead>
-                <tr>
-                  <th>Photo</th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Phone</th>
-                  <th>Role</th>
-                  <th>Registered On</th>
-                </tr>
-              </thead>
-              <tbody id="usersTableBody">
-                <tr><td colspan="6" style="text-align: center;">Loading...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </div>
-  </main>
+    <script>
+      const API_URL = "";
+      let scanner = null;
+      let scanHistory = [];
+      let libraryLoaded = false;
 
-  <script src="https://unpkg.com/html5-qrcode"></script>
-  
-  <script>
-    const API_URL = '';
-    let scanner = null;
-    let scanHistory = [];
-    let libraryLoaded = false;
-
-    // Initialize on page load
-    window.addEventListener('DOMContentLoaded', () => {
-      // Check authentication
-      if (!localStorage.getItem('token')) {
-        window.location.href = 'login.html';
-        return;
-      }
-
-      const user = JSON.parse(localStorage.getItem('user'));
-
-      // Verify admin role
-      if (user.role !== 'admin') {
-        window.location.href = 'dashboard.html';
-        return;
-      }
-
-      document.querySelector('.user-name').textContent = `👤 Admin: ${user.name}`;
-      
-      // Check if html5-qrcode library is loaded
-      setTimeout(() => {
-        checkLibraryStatus();
-      }, 500);
-
-      updateScanHistory();
-    });
-
-    function checkLibraryStatus() {
-      const statusDiv = document.getElementById('libraryStatus');
-      
-      if (typeof Html5Qrcode !== 'undefined') {
-        console.log('✓ Html5Qrcode library loaded successfully');
-        libraryLoaded = true;
-        statusDiv.innerHTML = '<div class="alert alert-success">✓ QR Scanner Ready</div>';
-      } else {
-        console.error('✗ Html5Qrcode library failed to load');
-        libraryLoaded = false;
-        statusDiv.innerHTML = '<div class="alert alert-error">✗ QR Scanner library not loaded. Please refresh the page.</div>';
-        document.getElementById('startBtn').disabled = true;
-      }
-    }
-
-    function startScanner() {
-      const reader = document.getElementById('reader');
-      
-      if (!libraryLoaded) {
-        alert('QR Scanner library is not loaded. Please refresh the page.');
-        return;
-      }
-
-      reader.style.display = 'block';
-      document.getElementById('startBtn').disabled = true;
-      document.getElementById('stopBtn').disabled = false;
-
-      try {
-        if (typeof Html5Qrcode === 'undefined') {
-          alert('QR Scanner library not loaded. Please refresh and try again.');
-          reader.style.display = 'none';
-          document.getElementById('startBtn').disabled = false;
-          document.getElementById('stopBtn').disabled = true;
+      // Initialize on page load
+      window.addEventListener("DOMContentLoaded", () => {
+        // Check authentication
+        if (!localStorage.getItem("token")) {
+          window.location.href = "login.html";
           return;
         }
 
-        scanner = new Html5Qrcode('reader');
+        const user = JSON.parse(localStorage.getItem("user"));
 
-        scanner.start(
-          { facingMode: 'environment' },
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 }
-          },
-          onScanSuccess,
-          onScanError
-        ).then(() => {
-          console.log('✓ Scanner started successfully');
-        }).catch(err => {
-          console.error('Error starting scanner:', err);
-          alert('Camera access denied or device not supported.\n\nError: ' + err.message);
-          reader.style.display = 'none';
-          scanner = null;
-          document.getElementById('startBtn').disabled = false;
-          document.getElementById('stopBtn').disabled = true;
-        });
-      } catch (err) {
-        console.error('Scanner initialization error:', err);
-        alert('Failed to initialize scanner: ' + err.message);
-        reader.style.display = 'none';
-        document.getElementById('startBtn').disabled = false;
-        document.getElementById('stopBtn').disabled = true;
-      }
-    }
-
-    function stopScanner() {
-      if (scanner) {
-        scanner.stop().then(() => {
-          document.getElementById('reader').style.display = 'none';
-          scanner = null;
-          console.log('✓ Scanner stopped');
-          document.getElementById('startBtn').disabled = false;
-          document.getElementById('stopBtn').disabled = true;
-        }).catch(err => {
-          console.error('Error stopping scanner:', err);
-          scanner = null;
-          document.getElementById('startBtn').disabled = false;
-          document.getElementById('stopBtn').disabled = true;
-        });
-      }
-    }
-
-    async function onScanSuccess(decodedText, decodedResult) {
-      try {
-        // Pause scanning to prevent rapid re-scans
-        if (scanner) {
-          await scanner.pause();
+        // Verify admin role
+        if (user.role !== "admin") {
+          window.location.href = "dashboard.html";
+          return;
         }
 
-        const response = await fetch(`${API_URL}/api/qr/validate`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          },
-          body: JSON.stringify({ token: decodedText })
-        });
+        document.querySelector(".user-name").textContent =
+          `👤 Admin: ${user.name}`;
 
-        const data = await response.json();
-        displayResult(data);
-
-        // Add to history
-        scanHistory.unshift({
-          timestamp: new Date().toLocaleTimeString(),
-          ...data
-        });
-
-        if (scanHistory.length > 10) {
-          scanHistory.pop();
-        }
+        // Check if html5-qrcode library is loaded
+        setTimeout(() => {
+          checkLibraryStatus();
+        }, 500);
 
         updateScanHistory();
+      });
 
-        // Resume scanning after 3 seconds
-        setTimeout(() => {
+      function checkLibraryStatus() {
+        const statusDiv = document.getElementById("libraryStatus");
+
+        if (typeof Html5Qrcode !== "undefined") {
+          console.log("✓ Html5Qrcode library loaded successfully");
+          libraryLoaded = true;
+          statusDiv.innerHTML =
+            '<div class="alert alert-success">✓ QR Scanner Ready</div>';
+        } else {
+          console.error("✗ Html5Qrcode library failed to load");
+          libraryLoaded = false;
+          statusDiv.innerHTML =
+            '<div class="alert alert-error">✗ QR Scanner library not loaded. Please refresh the page.</div>';
+          document.getElementById("startBtn").disabled = true;
+        }
+      }
+
+      function startScanner() {
+        const reader = document.getElementById("reader");
+
+        if (!libraryLoaded) {
+          alert("QR Scanner library is not loaded. Please refresh the page.");
+          return;
+        }
+
+        reader.style.display = "block";
+        document.getElementById("startBtn").disabled = true;
+        document.getElementById("stopBtn").disabled = false;
+
+        try {
+          if (typeof Html5Qrcode === "undefined") {
+            alert(
+              "QR Scanner library not loaded. Please refresh and try again.",
+            );
+            reader.style.display = "none";
+            document.getElementById("startBtn").disabled = false;
+            document.getElementById("stopBtn").disabled = true;
+            return;
+          }
+
+          scanner = new Html5Qrcode("reader");
+
+          scanner
+            .start(
+              { facingMode: "environment" },
+              {
+                fps: 10,
+                qrbox: { width: 250, height: 250 },
+              },
+              onScanSuccess,
+              onScanError,
+            )
+            .then(() => {
+              console.log("✓ Scanner started successfully");
+            })
+            .catch((err) => {
+              console.error("Error starting scanner:", err);
+              alert(
+                "Camera access denied or device not supported.\n\nError: " +
+                  err.message,
+              );
+              reader.style.display = "none";
+              scanner = null;
+              document.getElementById("startBtn").disabled = false;
+              document.getElementById("stopBtn").disabled = true;
+            });
+        } catch (err) {
+          console.error("Scanner initialization error:", err);
+          alert("Failed to initialize scanner: " + err.message);
+          reader.style.display = "none";
+          document.getElementById("startBtn").disabled = false;
+          document.getElementById("stopBtn").disabled = true;
+        }
+      }
+
+      function stopScanner() {
+        if (scanner) {
+          scanner
+            .stop()
+            .then(() => {
+              document.getElementById("reader").style.display = "none";
+              scanner = null;
+              console.log("✓ Scanner stopped");
+              document.getElementById("startBtn").disabled = false;
+              document.getElementById("stopBtn").disabled = true;
+            })
+            .catch((err) => {
+              console.error("Error stopping scanner:", err);
+              scanner = null;
+              document.getElementById("startBtn").disabled = false;
+              document.getElementById("stopBtn").disabled = true;
+            });
+        }
+      }
+
+      async function onScanSuccess(decodedText, decodedResult) {
+        try {
+          // Pause scanning to prevent rapid re-scans
+          if (scanner) {
+            await scanner.pause();
+          }
+
+          const response = await fetch(`${API_URL}/api/qr/validate`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+            body: JSON.stringify({ token: decodedText }),
+          });
+
+          const data = await response.json();
+          displayResult(data);
+
+          // Add to history
+          scanHistory.unshift({
+            timestamp: new Date().toLocaleTimeString(),
+            ...data,
+          });
+
+          if (scanHistory.length > 10) {
+            scanHistory.pop();
+          }
+
+          updateScanHistory();
+
+          // Resume scanning after 3 seconds
+          setTimeout(() => {
+            if (scanner) {
+              scanner.resume();
+            }
+          }, 3000);
+        } catch (err) {
+          console.error("Validation error:", err);
+          displayResult({
+            valid: false,
+            reason: "Validation failed. Please try again.",
+          });
+
+          // Resume scanning
           if (scanner) {
             scanner.resume();
           }
-        }, 3000);
-      } catch (err) {
-        console.error('Validation error:', err);
-        displayResult({
-          valid: false,
-          reason: 'Validation failed. Please try again.'
-        });
-
-        // Resume scanning
-        if (scanner) {
-          scanner.resume();
         }
       }
-    }
 
-    function onScanError(error) {
-      // Silently handle scanning errors
-      console.log('Scan error:', error);
-    }
+      function onScanError(error) {
+        // Silently handle scanning errors
+        console.log("Scan error:", error);
+      }
 
-    function displayResult(result) {
-      const resultDiv = document.getElementById('scanResult');
-      
-      if (result.valid) {
-        const member = result.member;
-        const age = member.age;
-        resultDiv.innerHTML = `
+      function displayResult(result) {
+        const resultDiv = document.getElementById("scanResult");
+
+        if (result.valid) {
+          const member = result.member;
+          const age = member.age;
+          resultDiv.innerHTML = `
           <div class="result valid">
             <h3 style="color: #28a745;">✓ VALID - ENTRY ALLOWED</h3>
-            <img src="${member.photo_path || 'https://via.placeholder.com/150'}" alt="${member.name}" class="member-photo">
+            <img src="${member.photo_path || "https://via.placeholder.com/150"}" alt="${member.name}" class="member-photo">
             <div class="result-details">
               <p><strong>Name:</strong> ${member.name}</p>
               <p><strong>Age:</strong> ${age} years</p>
@@ -294,181 +349,213 @@
             </div>
           </div>
         `;
-      } else {
-        resultDiv.innerHTML = `
+        } else {
+          resultDiv.innerHTML = `
           <div class="result invalid">
             <h3 style="color: #dc3545;">✗ INVALID - ENTRY DENIED</h3>
             <p><strong>Reason:</strong> ${result.reason}</p>
           </div>
         `;
+        }
+
+        resultDiv.classList.remove("hidden");
+        setTimeout(() => {
+          resultDiv.classList.add("hidden");
+        }, 5000);
       }
 
-      resultDiv.classList.remove('hidden');
-      setTimeout(() => {
-        resultDiv.classList.add('hidden');
-      }, 5000);
-    }
+      function updateScanHistory() {
+        const historyDiv = document.getElementById("scanHistory");
 
-    function updateScanHistory() {
-      const historyDiv = document.getElementById('scanHistory');
-      
-      if (scanHistory.length === 0) {
-        historyDiv.innerHTML = '<p class="empty-state">No scans yet. Start scanning QR codes!</p>';
-        return;
-      }
-
-      historyDiv.innerHTML = scanHistory.map((scan, index) => `
-        <div class="scan-history-item ${scan.valid ? 'success' : 'error'}">
-          <span class="time">${scan.timestamp}</span>
-          <span class="status">${scan.valid ? '✓ VALID' : '✗ INVALID'}</span>
-          ${scan.valid ? `<span class="name">${scan.member.name}</span>` : `<span class="reason">${scan.reason}</span>`}
-        </div>
-      `).join('');
-    }
-
-    function switchTab(tabName) {
-      // Hide all tabs
-      document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.classList.remove('active');
-      });
-
-      // Remove active class from all buttons
-      document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-      });
-
-      // Show selected tab
-      document.getElementById(tabName + '-tab').classList.add('active');
-
-      // Add active class to clicked button
-      event.target.classList.add('active');
-
-      // Load tables if switching to users or members tab
-      if (tabName === 'users') {
-        loadUsersTable();
-      } else if (tabName === 'members') {
-        loadMembersTable();
-      }
-    }
-
-    async function loadUsersTable() {
-      try {
-        const response = await fetch(`${API_URL}/api/admin/users`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        });
-
-        const data = await response.json();
-        const tbody = document.getElementById('usersTableBody');
-
-        if (!data || data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">No registered users found.</td></tr>';
+        if (scanHistory.length === 0) {
+          historyDiv.innerHTML =
+            '<p class="empty-state">No scans yet. Start scanning QR codes!</p>';
           return;
         }
 
-        tbody.innerHTML = data.map(user => {
-          const registeredDate = new Date(user.created_at).toLocaleDateString();
-          const roleLabel = user.role === 'admin' ? '🔐 Admin' : '👤 Member';
+        historyDiv.innerHTML = scanHistory
+          .map(
+            (scan, index) => `
+        <div class="scan-history-item ${scan.valid ? "success" : "error"}">
+          <span class="time">${scan.timestamp}</span>
+          <span class="status">${scan.valid ? "✓ VALID" : "✗ INVALID"}</span>
+          ${scan.valid ? `<span class="name">${scan.member.name}</span>` : `<span class="reason">${scan.reason}</span>`}
+        </div>
+      `,
+          )
+          .join("");
+      }
 
-          return `
+      function switchTab(tabName) {
+        // Hide all tabs
+        document.querySelectorAll(".tab-content").forEach((tab) => {
+          tab.classList.remove("active");
+        });
+
+        // Remove active class from all buttons
+        document.querySelectorAll(".tab-btn").forEach((btn) => {
+          btn.classList.remove("active");
+        });
+
+        // Show selected tab
+        document.getElementById(tabName + "-tab").classList.add("active");
+
+        // Add active class to clicked button
+        event.target.classList.add("active");
+
+        // Load tables if switching to users or members tab
+        if (tabName === "users") {
+          loadUsersTable();
+        } else if (tabName === "members") {
+          loadMembersTable();
+        }
+      }
+
+      async function loadUsersTable() {
+        try {
+          const response = await fetch(`${API_URL}/api/admin/users`, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+          });
+
+          const data = await response.json();
+          const tbody = document.getElementById("usersTableBody");
+
+          if (!data || data.length === 0) {
+            tbody.innerHTML =
+              '<tr><td colspan="6" style="text-align: center;">No registered users found.</td></tr>';
+            return;
+          }
+
+          tbody.innerHTML = data
+            .map((user) => {
+              const registeredDate = new Date(
+                user.created_at,
+              ).toLocaleDateString();
+              const roleLabel =
+                user.role === "admin" ? "🔐 Admin" : "👤 Member";
+
+              return `
             <tr>
-              <td><img src="${user.photo_path || 'https://via.placeholder.com/50'}" alt="${user.name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
+              <td><img src="${user.photo_path || "https://via.placeholder.com/50"}" alt="${user.name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
               <td>${user.name}</td>
               <td>${user.email}</td>
-              <td>${user.phone || 'N/A'}</td>
+              <td>${user.phone || "N/A"}</td>
               <td><span class="role-badge ${user.role}">${roleLabel}</span></td>
               <td>${registeredDate}</td>
             </tr>
           `;
-        }).join('');
-      } catch (err) {
-        console.error('Error loading users table:', err);
-        document.getElementById('usersTableBody').innerHTML = '<tr><td colspan="6" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
+            })
+            .join("");
+        } catch (err) {
+          console.error("Error loading users table:", err);
+          document.getElementById("usersTableBody").innerHTML =
+            '<tr><td colspan="6" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
+        }
       }
-    }
 
-    async function loadMembersTable() {
-      try {
-        const response = await fetch(`${API_URL}/api/admin/members-subscriptions`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        });
+      async function loadMembersTable() {
+        try {
+          const response = await fetch(
+            `${API_URL}/api/admin/members-subscriptions`,
+            {
+              headers: {
+                Authorization: `Bearer ${localStorage.getItem("token")}`,
+              },
+            },
+          );
 
-        if (response.status === 404) {
-          // Fallback if endpoint doesn't exist - load from all subscriptions
-          document.getElementById('membersTableBody').innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">Members data endpoint not yet available. Use QR Scanner to validate entries.</td></tr>';
-          return;
-        }
+          if (response.status === 404) {
+            // Fallback if endpoint doesn't exist - load from all subscriptions
+            document.getElementById("membersTableBody").innerHTML =
+              '<tr><td colspan="8" style="text-align: center; padding: 2rem;">Members data endpoint not yet available. Use QR Scanner to validate entries.</td></tr>';
+            return;
+          }
 
-        const data = await response.json();
-        const tbody = document.getElementById('membersTableBody');
+          const data = await response.json();
+          const tbody = document.getElementById("membersTableBody");
 
-        if (!data || data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">No active subscriptions found.</td></tr>';
-          return;
-        }
+          if (!data || data.length === 0) {
+            tbody.innerHTML =
+              '<tr><td colspan="8" style="text-align: center;">No active subscriptions found.</td></tr>';
+            return;
+          }
 
-        tbody.innerHTML = data.map(sub => {
-          const expiryDate = new Date(sub.expires_at);
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const isExpired = expiryDate < today;
-          const daysLeft = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+          tbody.innerHTML = data
+            .map((sub) => {
+              const expiryDate = new Date(sub.expires_at);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const isExpired = expiryDate < today;
+              const daysLeft = Math.ceil(
+                (expiryDate - today) / (1000 * 60 * 60 * 24),
+              );
 
-          return `
+              return `
             <tr>
-              <td><img src="${sub.photo_path || 'https://via.placeholder.com/50'}" alt="${sub.member_name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
+              <td><img src="${sub.photo_path || "https://via.placeholder.com/50"}" alt="${sub.member_name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
               <td>${sub.member_name}</td>
               <td>${sub.age}</td>
               <td>${sub.user_name}</td>
               <td>${sub.plan_name}</td>
               <td>${new Date(sub.start_date).toLocaleDateString()}</td>
               <td>${expiryDate.toLocaleDateString()}</td>
-              <td><span class="status-badge ${isExpired ? 'expired' : 'active'}">${isExpired ? '❌ Expired' : `✓ ${daysLeft}d`}</span></td>
+              <td><span class="status-badge ${isExpired ? "expired" : "active"}">${isExpired ? "❌ Expired" : `✓ ${daysLeft}d`}</span></td>
             </tr>
           `;
-        }).join('');
-      } catch (err) {
-        console.error('Error loading members table:', err);
-        document.getElementById('membersTableBody').innerHTML = '<tr><td colspan="8" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
-      }
-    }
-
-    async function loadUsersTable() {
-      try {
-        const response = await fetch(`${API_URL}/api/admin/users`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        });
-
-        const data = await response.json();
-        const tbody = document.getElementById('usersTableBody');
-
-        if (!data || data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">No registered users found.</td></tr>';
-          return;
+            })
+            .join("");
+        } catch (err) {
+          console.error("Error loading members table:", err);
+          document.getElementById("membersTableBody").innerHTML =
+            '<tr><td colspan="8" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
         }
+      }
 
-        tbody.innerHTML = data.map(user => {
-          return `
+      async function loadUsersTable() {
+        try {
+          const response = await fetch(`${API_URL}/api/admin/users`, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+          });
+
+          const data = await response.json();
+          const tbody = document.getElementById("usersTableBody");
+
+          if (!data || data.length === 0) {
+            tbody.innerHTML =
+              '<tr><td colspan="6" style="text-align: center;">No registered users found.</td></tr>';
+            return;
+          }
+
+          tbody.innerHTML = data
+            .map((user) => {
+              return `
             <tr>
-              <td><img src="${user.photo_path || 'https://via.placeholder.com/50'}" alt="${user.name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
+              <td><img src="${user.photo_path || "https://via.placeholder.com/50"}" alt="${user.name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
               <td><strong>${user.name}</strong></td>
               <td>${user.email}</td>
-              <td>${user.phone || 'N/A'}</td>
+              <td>${user.phone || "N/A"}</td>
               <td><span style="background: #e3f2fd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${user.role}</span></td>
               <td>${new Date(user.created_at).toLocaleDateString()}</td>
             </tr>
           `;
-        }).join('');
-      } catch (err) {
-        console.error('Error loading users table:', err);
-        document.getElementById('usersTableBody').innerHTML = '<tr><td colspan="6" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
+            })
+            .join("");
+        } catch (err) {
+          console.error("Error loading users table:", err);
+          document.getElementById("usersTableBody").innerHTML =
+            '<tr><td colspan="6" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
+        }
       }
-    }
 
-    function logout() {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = 'login.html';
-    }
-  </script>
-</body>
+      function logout() {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        window.location.href = "login.html";
+      }
+    </script>
+  </body>
 </html>

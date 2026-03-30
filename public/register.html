@@ -1,114 +1,126 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Register - PoolManager</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <nav class="navbar">
-    <div class="container">
-      <div class="logo">🏊 PoolManager</div>
-      <ul class="nav-links">
-        <li><a href="index.html">Home</a></li>
-        <li><a href="login.html" class="btn btn-primary">Login</a></li>
-      </ul>
-    </div>
-  </nav>
-
-  <main>
-    <div class="auth-container">
-      <div class="auth-box">
-        <h1>Register</h1>
-        <form id="registerForm">
-          <div class="form-group">
-            <label for="name">Full Name</label>
-            <input type="text" id="name" name="name" required>
-          </div>
-
-          <div class="form-group">
-            <label for="email">Email</label>
-            <input type="email" id="email" name="email" required>
-          </div>
-
-          <div class="form-group">
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" required>
-          </div>
-
-          <div class="form-group">
-            <label for="phone">Phone Number</label>
-            <input type="tel" id="phone" name="phone" required>
-          </div>
-
-          <div class="form-group">
-            <label for="photo">Profile Photo</label>
-            <input type="file" id="photo" name="photo" accept="image/*">
-            <div id="photoPreview" class="photo-preview"></div>
-          </div>
-
-          <button type="submit" class="btn btn-success btn-block">Register</button>
-
-          <p class="auth-link">Already have an account? <a href="login.html">Login here</a></p>
-        </form>
-
-        <div id="message" class="message"></div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Register - PoolManager</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="container">
+        <div class="logo">🏊 PoolManager</div>
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="login.html" class="btn btn-primary">Login</a></li>
+        </ul>
       </div>
-    </div>
-  </main>
+    </nav>
 
-  <script>
-    const API_URL = '';
+    <main>
+      <div class="auth-container">
+        <div class="auth-box">
+          <h1>Register</h1>
+          <form id="registerForm">
+            <div class="form-group">
+              <label for="name">Full Name</label>
+              <input type="text" id="name" name="name" required />
+            </div>
 
-    const photoInput = document.getElementById('photo');
-    const photoPreview = document.getElementById('photoPreview');
+            <div class="form-group">
+              <label for="email">Email</label>
+              <input type="email" id="email" name="email" required />
+            </div>
 
-    photoInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          photoPreview.innerHTML = `<img src="${event.target.result}" alt="preview">`;
-        };
-        reader.readAsDataURL(file);
-      }
-    });
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input type="password" id="password" name="password" required />
+            </div>
 
-    document.getElementById('registerForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
+            <div class="form-group">
+              <label for="phone">Phone Number</label>
+              <input type="tel" id="phone" name="phone" required />
+            </div>
 
-      const formData = new FormData();
-      formData.append('name', document.getElementById('name').value);
-      formData.append('email', document.getElementById('email').value);
-      formData.append('password', document.getElementById('password').value);
-      formData.append('phone', document.getElementById('phone').value);
-      
-      if (photoInput.files[0]) {
-        formData.append('photo', photoInput.files[0]);
-      }
+            <div class="form-group">
+              <label for="photo">Profile Photo</label>
+              <input type="file" id="photo" name="photo" accept="image/*" />
+              <div id="photoPreview" class="photo-preview"></div>
+            </div>
 
-      try {
-        const response = await fetch(`${API_URL}/api/register`, {
-          method: 'POST',
-          body: formData
-        });
+            <button type="submit" class="btn btn-success btn-block">
+              Register
+            </button>
 
-        const data = await response.json();
+            <p class="auth-link">
+              Already have an account? <a href="login.html">Login here</a>
+            </p>
+          </form>
 
-        if (response.ok) {
-          localStorage.setItem('token', data.token);
-          localStorage.setItem('user', JSON.stringify(data.user));
-          document.getElementById('message').innerHTML = '<div class="alert alert-success">Registration successful! Redirecting to dashboard...</div>';
-          setTimeout(() => window.location.href = 'dashboard.html', 2000);
-        } else {
-          document.getElementById('message').innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+          <div id="message" class="message"></div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const API_URL = "";
+
+      const photoInput = document.getElementById("photo");
+      const photoPreview = document.getElementById("photoPreview");
+
+      photoInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            photoPreview.innerHTML = `<img src="${event.target.result}" alt="preview">`;
+          };
+          reader.readAsDataURL(file);
         }
-      } catch (err) {
-        console.error(err);
-        document.getElementById('message').innerHTML = '<div class="alert alert-error">Registration failed. Please try again.</div>';
-      }
-    });
-  </script>
-</body>
+      });
+
+      document
+        .getElementById("registerForm")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          const formData = new FormData();
+          formData.append("name", document.getElementById("name").value);
+          formData.append("email", document.getElementById("email").value);
+          formData.append(
+            "password",
+            document.getElementById("password").value,
+          );
+          formData.append("phone", document.getElementById("phone").value);
+
+          if (photoInput.files[0]) {
+            formData.append("photo", photoInput.files[0]);
+          }
+
+          try {
+            const response = await fetch(`${API_URL}/api/register`, {
+              method: "POST",
+              body: formData,
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+              localStorage.setItem("token", data.token);
+              localStorage.setItem("user", JSON.stringify(data.user));
+              document.getElementById("message").innerHTML =
+                '<div class="alert alert-success">Registration successful! Redirecting to dashboard...</div>';
+              setTimeout(() => (window.location.href = "dashboard.html"), 2000);
+            } else {
+              document.getElementById("message").innerHTML =
+                `<div class="alert alert-error">${data.error}</div>`;
+            }
+          } catch (err) {
+            console.error(err);
+            document.getElementById("message").innerHTML =
+              '<div class="alert alert-error">Registration failed. Please try again.</div>';
+          }
+        });
+    </script>
+  </body>
 </html>

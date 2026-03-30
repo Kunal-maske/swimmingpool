@@ -1,99 +1,118 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login - PoolManager</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <nav class="navbar">
-    <div class="container">
-      <div class="logo">🏊 PoolManager</div>
-      <ul class="nav-links">
-        <li><a href="index.html">Home</a></li>
-        <li><a href="register.html" class="btn btn-success">Register</a></li>
-      </ul>
-    </div>
-  </nav>
-
-  <main>
-    <div class="auth-container">
-      <div class="auth-box">
-        <h1>Login</h1>
-        <form id="loginForm">
-          <div class="form-group">
-            <label for="email">Email</label>
-            <input type="email" id="email" name="email" required>
-          </div>
-
-          <div class="form-group">
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" required>
-          </div>
-
-          <button type="submit" class="btn btn-primary btn-block">Login</button>
-
-          <p class="auth-link">Don't have an account? <a href="register.html">Register here</a></p>
-          
-          <hr>
-          
-          <div class="demo-login">
-            <h4>Demo Credentials</h4>
-            <p><strong>Admin:</strong> admin@pool.com / admin123</p>
-            <button type="button" class="btn btn-secondary btn-block" onclick="demoLogin('admin@pool.com', 'admin123')">Login as Admin</button>
-          </div>
-        </form>
-
-        <div id="message" class="message"></div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login - PoolManager</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="container">
+        <div class="logo">🏊 PoolManager</div>
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="register.html" class="btn btn-success">Register</a></li>
+        </ul>
       </div>
-    </div>
-  </main>
+    </nav>
 
-  <script>
-    const API_URL = '';
+    <main>
+      <div class="auth-container">
+        <div class="auth-box">
+          <h1>Login</h1>
+          <form id="loginForm">
+            <div class="form-group">
+              <label for="email">Email</label>
+              <input type="email" id="email" name="email" required />
+            </div>
 
-    function demoLogin(email, password) {
-      document.getElementById('email').value = email;
-      document.getElementById('password').value = password;
-      document.getElementById('loginForm').dispatchEvent(new Event('submit'));
-    }
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input type="password" id="password" name="password" required />
+            </div>
 
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
+            <button type="submit" class="btn btn-primary btn-block">
+              Login
+            </button>
 
-      const email = document.getElementById('email').value;
-      const password = document.getElementById('password').value;
+            <p class="auth-link">
+              Don't have an account? <a href="register.html">Register here</a>
+            </p>
 
-      try {
-        const response = await fetch(`${API_URL}/api/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-        });
+            <hr />
 
-        const data = await response.json();
+            <div class="demo-login">
+              <h4>Demo Credentials</h4>
+              <p><strong>Admin:</strong> admin@pool.com / admin123</p>
+              <button
+                type="button"
+                class="btn btn-secondary btn-block"
+                onclick="demoLogin('admin@pool.com', 'admin123')"
+              >
+                Login as Admin
+              </button>
+            </div>
+          </form>
 
-        if (response.ok) {
-          localStorage.setItem('token', data.token);
-          localStorage.setItem('user', JSON.stringify(data.user));
-          
-          // Redirect based on role
-          if (data.user.role === 'admin') {
-            document.getElementById('message').innerHTML = '<div class="alert alert-success">Login successful! Redirecting to admin panel...</div>';
-            setTimeout(() => window.location.href = 'admin.html', 2000);
-          } else {
-            document.getElementById('message').innerHTML = '<div class="alert alert-success">Login successful! Redirecting to dashboard...</div>';
-            setTimeout(() => window.location.href = 'dashboard.html', 2000);
-          }
-        } else {
-          document.getElementById('message').innerHTML = `<div class="alert alert-error">${data.error}</div>`;
-        }
-      } catch (err) {
-        console.error(err);
-        document.getElementById('message').innerHTML = '<div class="alert alert-error">Login failed. Please try again.</div>';
+          <div id="message" class="message"></div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const API_URL = "";
+
+      function demoLogin(email, password) {
+        document.getElementById("email").value = email;
+        document.getElementById("password").value = password;
+        document.getElementById("loginForm").dispatchEvent(new Event("submit"));
       }
-    });
-  </script>
-</body>
+
+      document
+        .getElementById("loginForm")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          const email = document.getElementById("email").value;
+          const password = document.getElementById("password").value;
+
+          try {
+            const response = await fetch(`${API_URL}/api/login`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email, password }),
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+              localStorage.setItem("token", data.token);
+              localStorage.setItem("user", JSON.stringify(data.user));
+
+              // Redirect based on role
+              if (data.user.role === "admin") {
+                document.getElementById("message").innerHTML =
+                  '<div class="alert alert-success">Login successful! Redirecting to admin panel...</div>';
+                setTimeout(() => (window.location.href = "admin.html"), 2000);
+              } else {
+                document.getElementById("message").innerHTML =
+                  '<div class="alert alert-success">Login successful! Redirecting to dashboard...</div>';
+                setTimeout(
+                  () => (window.location.href = "dashboard.html"),
+                  2000,
+                );
+              }
+            } else {
+              document.getElementById("message").innerHTML =
+                `<div class="alert alert-error">${data.error}</div>`;
+            }
+          } catch (err) {
+            console.error(err);
+            document.getElementById("message").innerHTML =
+              '<div class="alert alert-error">Login failed. Please try again.</div>';
+          }
+        });
+    </script>
+  </body>
 </html>

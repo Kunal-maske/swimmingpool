@@ -270,9 +270,13 @@
           return;
         }
 
+        // Get Razorpay key
+        const keyResponse = await fetch(`${API_URL}/api/razorpay-key`);
+        const keyData = await keyResponse.json();
+
         // Open Razorpay checkout
         const options = {
-          key: 'rzp_test_1DP5MMOk92gagR', // Replace with actual key
+          key: keyData.keyId,
           amount: orderData.amount * 100,
           currency: 'INR',
           name: 'Swimming Pool',
