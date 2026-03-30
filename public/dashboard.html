@@ -53,7 +53,7 @@
 
       <!-- Section 2: Subscribe to Plans -->
       <section class="card">
-        <h2>📋 Subscribe to Plans</h2>
+        <h2>📋 Subscription Cart</h2>
         <div class="subscribe-form">
           <div class="form-row">
             <div class="form-group">
@@ -72,9 +72,27 @@
               <label>Price</label>
               <input type="text" id="priceDisplay" readonly placeholder="₹0">
             </div>
-            <button type="button" class="btn btn-success" onclick="initiatePayment()">Subscribe Now</button>
+            <button type="button" class="btn btn-primary" onclick="addToCart()">+ Add to Cart</button>
           </div>
         </div>
+
+        <!-- Cart Items -->
+        <div id="cartSection" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; display: none;">
+          <h3>📦 Cart Items</h3>
+          <div id="cartItems" class="cart-list"></div>
+          
+          <div style="margin-top: 15px; padding: 15px; background: #f0f0f0; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: bold; margin-bottom: 15px;">
+              <span>Total Amount:</span>
+              <span id="totalPrice">₹0</span>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <button type="button" class="btn btn-danger" onclick="clearCart()" style="flex: 1;">Clear Cart</button>
+              <button type="button" class="btn btn-success" onclick="proceedToCheckout()" style="flex: 1;">Proceed to Checkout</button>
+            </div>
+          </div>
+        </div>
+
         <div id="subscriptionMessage" class="message"></div>
       </section>
 
@@ -92,6 +110,9 @@
     let selectedMemberId = null;
     let selectedPlanId = null;
     let memberAge = 0;
+    let subscriptionCart = []; // Store multiple subscriptions
+    let allMembers = []; // Store all family members
+    let allPlans = []; // Store all plans
 
     // Check authentication
     if (!localStorage.getItem('token')) {
@@ -123,6 +144,7 @@
         });
 
         const members = await response.json();
+        allMembers = members; // Store globally
         
         // Populate dropdown
         const select = document.getElementById('selectMember');
@@ -193,6 +215,7 @@
       try {
         const response = await fetch(`${API_URL}/api/plans`);
         const plans = await response.json();
+        allPlans = plans; // Store globally
 
         const select = document.getElementById('selectPlan');
         select.innerHTML = '<option value="">-- Choose a plan --</option>';
@@ -240,6 +263,195 @@
         document.getElementById('priceDisplay').value = `₹${price}`;
       } catch (err) {
         console.error(err);
+      }
+    }
+
+    // Cart Management Functions
+    function addToCart() {
+      const memberId = document.getElementById('selectMember').value;
+      const planId = document.getElementById('selectPlan').value;
+
+      if (!memberId || !planId) {
+        alert('Please select a member and plan');
+        return;
+      }
+
+      const member = allMembers.find(m => m.id == memberId);
+      const plan = allPlans.find(p => p.id == planId);
+      const age = getAge(member.date_of_birth);
+      
+      let price;
+      if (age < 12) price = plan.child_price;
+      else if (age >= 60) price = plan.senior_price;
+      else price = plan.adult_price;
+
+      // Check if already in cart
+      const cartItem = subscriptionCart.find(item => item.memberId == memberId && item.planId == planId);
+      if (cartItem) {
+        alert('This member + plan combination is already in the cart');
+        return;
+      }
+
+      subscriptionCart.push({
+        memberId,
+        planId,
+        memberName: member.name,
+        planName: plan.name,
+        age,
+        price
+      });
+
+      updateCartDisplay();
+      document.getElementById('selectMember').value = '';
+      document.getElementById('selectPlan').value = '';
+      document.getElementById('priceDisplay').value = '₹0';
+    }
+
+    function updateCartDisplay() {
+      const cartSection = document.getElementById('cartSection');
+      const cartItems = document.getElementById('cartItems');
+      
+      if (subscriptionCart.length === 0) {
+        cartSection.style.display = 'none';
+        return;
+      }
+
+      cartSection.style.display = 'block';
+      
+      cartItems.innerHTML = subscriptionCart.map((item, index) => `
+        <div class="cart-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #fff; border: 1px solid #ddd; margin-bottom: 10px; border-radius: 6px;">
+          <div>
+            <strong>${item.memberName}</strong> (${item.age} yrs)
+            <br/>
+            <small>${item.planName}</small>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-weight: bold; font-size: 16px;">₹${item.price}</span>
+            <button type="button" class="btn btn-sm btn-danger" onclick="removeFromCart(${index})" style="padding: 5px 10px; font-size: 12px;">Remove</button>
+          </div>
+        </div>
+      `).join('');
+
+      const total = subscriptionCart.reduce((sum, item) => sum + item.price, 0);
+      document.getElementById('totalPrice').textContent = `₹${total}`;
+    }
+
+    function removeFromCart(index) {
+      subscriptionCart.splice(index, 1);
+      updateCartDisplay();
+    }
+
+    function clearCart() {
+      if (confirm('Clear all items from cart?')) {
+        subscriptionCart = [];
+        updateCartDisplay();
+      }
+    }
+
+    async function proceedToCheckout() {
+      if (subscriptionCart.length === 0) {
+        alert('Cart is empty');
+        return;
+      }
+
+      try {
+        // Create order for all items
+        const response = await fetch(`${API_URL}/api/create-order-batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({
+            items: subscriptionCart
+          })
+        });
+
+        const orderData = await response.json();
+
+        if (!response.ok) {
+          document.getElementById('subscriptionMessage').innerHTML = `<div class="alert alert-error">${orderData.error}</div>`;
+          return;
+        }
+
+        // Get Razorpay key
+        const keyResponse = await fetch(`${API_URL}/api/razorpay-key`);
+        const keyData = await keyResponse.json();
+
+        // Open Razorpay checkout
+        const options = {
+          key: keyData.keyId,
+          amount: orderData.amount * 100,
+          currency: 'INR',
+          name: 'Swimming Pool',
+          description: `${subscriptionCart.length} family member(s) subscription`,
+          order_id: orderData.orderId,
+          handler: function(response) {
+            verifyBatchPayment(response);
+          },
+          prefill: {
+            name: user.name,
+            email: user.email
+          }
+        };
+
+        const rzp = new Razorpay(options);
+        rzp.open();
+      } catch (err) {
+        console.error(err);
+        document.getElementById('subscriptionMessage').innerHTML = '<div class="alert alert-error">Failed to initiate payment</div>';
+      }
+    }
+
+    async function verifyBatchPayment(response) {
+      try {
+        const verifyResponse = await fetch(`${API_URL}/api/verify-payment-batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+            items: subscriptionCart
+          })
+        });
+
+        const data = await verifyResponse.json();
+
+        if (verifyResponse.ok) {
+          // Show success message with all QR codes
+          let qrHTML = '<div class="alert alert-success">Payment successful! QR Codes generated for all members.</div>';
+          qrHTML += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px;">';
+          
+          data.qrCodes.forEach((qr, index) => {
+            qrHTML += `
+              <div style="text-align: center; padding: 15px; border: 1px solid #ddd; border-radius: 8px;">
+                <h4 style="margin: 0 0 10px 0;">${subscriptionCart[index].memberName}</h4>
+                <img src="${qr.image}" alt="QR Code" style="max-width: 200px; margin-bottom: 10px;">
+                <p style="margin: 5px 0; font-size: 12px; color: #666;">Token: ${qr.token.substring(0, 12)}...</p>
+              </div>
+            `;
+          });
+
+          qrHTML += '</div>';
+          document.getElementById('subscriptionMessage').innerHTML = qrHTML;
+          
+          subscriptionCart = [];
+          updateCartDisplay();
+          loadQRCodes();
+          
+          setTimeout(() => {
+            document.getElementById('subscriptionMessage').innerHTML = '';
+          }, 15000);
+        } else {
+          document.getElementById('subscriptionMessage').innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+        }
+      } catch (err) {
+        console.error(err);
+        document.getElementById('subscriptionMessage').innerHTML = '<div class="alert alert-error">Payment verification failed</div>';
       }
     }
 

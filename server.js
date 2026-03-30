@@ -337,6 +337,143 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
   }
 });
 
+// Create Razorpay order for multiple family members (BATCH)
+app.post("/api/create-order-batch", verifyToken, async (req, res) => {
+  try {
+    const { items } = req.body;
+
+    if (!items || items.length === 0) {
+      return res.status(400).json({ error: "No items in cart" });
+    }
+
+    // Calculate total price
+    let totalAmount = 0;
+    for (const item of items) {
+      const member = await db.get(
+        "SELECT user_id FROM FamilyMembers WHERE id = ?",
+        [item.memberId],
+      );
+
+      if (!member || member.user_id !== req.user.id) {
+        return res.status(403).json({ error: "Unauthorized" });
+      }
+
+      totalAmount += item.price;
+    }
+
+    // Create Razorpay order
+    let order;
+    try {
+      if (isMockMode) {
+        order = {
+          id: `order_${Math.random().toString(36).substr(2, 9)}`,
+          amount: Math.round(totalAmount * 100),
+          currency: "INR",
+          status: "created",
+        };
+        console.log("Mock batch order created:", order.id);
+      } else {
+        order = await razorpay.orders.create({
+          amount: Math.round(totalAmount * 100),
+          currency: "INR",
+          receipt: `order_batch_${Date.now()}`,
+        });
+        console.log("Real Razorpay batch order created:", order.id);
+      }
+    } catch (paymentErr) {
+      console.error("Razorpay Error:", paymentErr.message);
+      return res.status(500).json({
+        error: `Payment gateway error: ${paymentErr.message}`,
+      });
+    }
+
+    res.json({
+      orderId: order.id,
+      amount: totalAmount,
+      currency: "INR",
+      itemCount: items.length,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: `Order creation failed: ${err.message}` });
+  }
+});
+
+// Verify payment and create multiple subscriptions (BATCH)
+app.post("/api/verify-payment-batch", verifyToken, async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      items,
+    } = req.body;
+
+    if (!items || items.length === 0) {
+      return res.status(400).json({ error: "No items to verify" });
+    }
+
+    // Verify signature (skip in mock mode)
+    if (!isMockMode) {
+      const body = razorpay_order_id + "|" + razorpay_payment_id;
+      const expectedSignature = crypto
+        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+        .update(body)
+        .digest("hex");
+
+      if (expectedSignature !== razorpay_signature) {
+        return res.status(400).json({ error: "Invalid payment signature" });
+      }
+    }
+
+    // Create subscriptions and QR codes for each item
+    const qrCodes = [];
+
+    for (const item of items) {
+      // Create subscription
+      const planDuration = await db.get(
+        "SELECT duration_days FROM Plans WHERE id = ?",
+        [item.planId],
+      );
+
+      const startDate = new Date().toISOString().split("T")[0];
+      const endDate = new Date(Date.now() + planDuration.duration_days * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0];
+
+      const subResult = await db.run(
+        `INSERT INTO Subscriptions (user_id, family_member_id, plan_id, start_date, end_date, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'active', datetime('now'))`,
+        [req.user.id, item.memberId, item.planId, startDate, endDate],
+      );
+
+      // Generate QR code
+      const token = uuidv4();
+      const qrImage = await QRCode.toDataURL(token);
+
+      const qrResult = await db.run(
+        `INSERT INTO QRCodes (subscription_id, token, is_valid, expires_at, created_at)
+         VALUES (?, ?, 1, ?, datetime('now'))`,
+        [subResult.lastID, token, endDate],
+      );
+
+      qrCodes.push({
+        image: qrImage,
+        token,
+        memberId: item.memberId,
+      });
+    }
+
+    res.json({
+      message: "Payment verified and subscriptions created",
+      qrCodes,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: `Payment verification failed: ${err.message}` });
+  }
+});
+
 // Verify payment and create subscription
 app.post("/api/verify-payment", verifyToken, async (req, res) => {
   try {
