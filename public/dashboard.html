@@ -164,6 +164,7 @@
             <h3>${member.name}</h3>
             <p>Age: ${getAge(member.date_of_birth)} years</p>
             <p>DOB: ${new Date(member.date_of_birth).toLocaleDateString()}</p>
+            <button type="button" class="btn btn-danger" style="width: 100%; margin-top: 10px;" onclick="deleteFamilyMember(${member.id}, '${member.name}')">🗑️ Delete</button>
           </div>
         `).join('');
 
@@ -172,6 +173,36 @@
         }
       } catch (err) {
         console.error(err);
+      }
+    }
+
+    async function deleteFamilyMember(memberId, memberName) {
+      if (!confirm(`Are you sure you want to delete ${memberName}? This will also delete all associated subscriptions and QR codes.`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_URL}/api/family-members/${memberId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          document.getElementById('memberMessage').innerHTML = '<div class="alert alert-success">Family member deleted successfully</div>';
+          loadFamilyMembers();
+          setTimeout(() => {
+            document.getElementById('memberMessage').innerHTML = '';
+          }, 3000);
+        } else {
+          document.getElementById('memberMessage').innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+        }
+      } catch (err) {
+        console.error(err);
+        document.getElementById('memberMessage').innerHTML = '<div class="alert alert-error">Failed to delete family member</div>';
       }
     }
 

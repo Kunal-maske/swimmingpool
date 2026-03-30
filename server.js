@@ -214,6 +214,41 @@ app.get("/api/family-members", verifyToken, async (req, res) => {
   }
 });
 
+// Delete family member
+app.delete("/api/family-members/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if member belongs to user
+    const member = await db.get(
+      "SELECT user_id FROM FamilyMembers WHERE id = ?",
+      [id],
+    );
+
+    if (!member || member.user_id !== req.user.id) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    // Delete associated QR codes and subscriptions
+    const subscriptions = await db.all(
+      "SELECT id FROM Subscriptions WHERE family_member_id = ?",
+      [id],
+    );
+
+    for (const sub of subscriptions) {
+      await db.run("DELETE FROM QRCodes WHERE subscription_id = ?", [sub.id]);
+    }
+
+    await db.run("DELETE FROM Subscriptions WHERE family_member_id = ?", [id]);
+    await db.run("DELETE FROM FamilyMembers WHERE id = ?", [id]);
+
+    res.json({ message: "Family member deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete family member" });
+  }
+});
+
 // ============ PLANS ROUTE ============
 
 // Get all plans
