@@ -1,7 +1,9 @@
 require("dotenv").config();
 const express = require("express");
 const multer = require("multer");
-const bcrypt = require("bcrypt");
+const helmet = require("helmet");
+const bcrypt = require("bcryptjs");
+const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
@@ -9,55 +11,132 @@ const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
 const Razorpay = require("razorpay");
+
+const JWT_SECRET = process.env.JWT_SECRET?.trim();
+if (
+  !JWT_SECRET ||
+  Buffer.byteLength(JWT_SECRET, "utf8") < 32 ||
+  /change_this|your_|replace_me/i.test(JWT_SECRET)
+) {
+  throw new Error("Set JWT_SECRET to a unique random value of at least 32 bytes");
+}
+
 const db = require("./database");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+const uploadsDirectory = path.resolve(
+  process.env.UPLOAD_DIR || path.join(__dirname, "uploads"),
+);
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
+  throw new Error("TRUST_PROXY_HOPS must be a non-negative integer");
+}
+if (trustProxyHops > 0) {
+  app.set("trust proxy", trustProxyHops);
+}
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(
+  crypto.randomBytes(48).toString("hex"),
+  12,
+);
 
-// Razorpay instance
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_1DP5MMOk92gagR",
-  key_secret: process.env.RAZORPAY_KEY_SECRET || "test_mode",
-});
+const razorpayKeyId = process.env.RAZORPAY_KEY_ID?.trim();
+const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
 
-// Check if using mock mode (test credentials)
-const isMockMode =
-  process.env.RAZORPAY_KEY_SECRET === "test_mode" ||
-  !process.env.RAZORPAY_KEY_SECRET ||
-  process.env.RAZORPAY_KEY_SECRET.includes("your_actual");
+const hasValidRazorpayConfig =
+  Boolean(razorpayKeyId) &&
+  Boolean(razorpayKeySecret) &&
+  !razorpayKeyId.includes("your_razorpay") &&
+  !razorpayKeySecret.includes("your_razorpay") &&
+  !razorpayKeySecret.includes("your_actual") &&
+  razorpayKeySecret !== "test_mode";
+
+const isMockMode = !hasValidRazorpayConfig;
+
+const razorpay = hasValidRazorpayConfig
+  ? new Razorpay({
+      key_id: razorpayKeyId,
+      key_secret: razorpayKeySecret,
+    })
+  : null;
+
 if (isMockMode) {
   console.log(
-    "⚠️  MOCK MODE: Using test orders (Razorpay credentials not configured)",
+    "⚠️  MOCK MODE: Razorpay credentials are missing or still using placeholders. Test orders will be used instead.",
   );
-  console.log("📝 To use real payments, update RAZORPAY_KEY_SECRET in .env");
 }
 
 // Middleware
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
-app.use(express.static("public"));
-app.use("/uploads", express.static("uploads"));
+app.disable("x-powered-by");
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ limit: "100kb", extended: false }));
+app.use(express.static(path.join(__dirname, "public"), { dotfiles: "deny" }));
+app.use(
+  "/uploads",
+  express.static(uploadsDirectory, { dotfiles: "deny", index: false }),
+);
 
 // Create uploads directory if it doesn't exist
-if (!fs.existsSync("uploads")) {
-  fs.mkdirSync("uploads");
-}
+fs.mkdirSync(uploadsDirectory, { recursive: true, mode: 0o750 });
 
 // Multer configuration for photo uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
+const allowedImageTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, callback) => {
+    if (!allowedImageTypes.has(file.mimetype)) {
+      callback(new Error("Unsupported image type"));
+      return;
+    }
+    callback(null, true);
   },
 });
 
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+const receivePhoto = (req, res, next) => {
+  upload.single("photo")(req, res, (error) => {
+    if (error) {
+      return res.status(400).json({
+        error: "Upload a JPEG, PNG, or WebP image no larger than 5 MB",
+      });
+    }
+    next();
+  });
+};
+
+const storeVerifiedPhoto = async (req, res, next) => {
+  if (!req.file) return next();
+
+  try {
+    const { fileTypeFromBuffer } = await import("file-type");
+    const detectedType = await fileTypeFromBuffer(req.file.buffer);
+    if (!detectedType || !allowedImageTypes.has(detectedType.mime)) {
+      return res.status(400).json({
+        error: "Upload a valid JPEG, PNG, or WebP image",
+      });
+    }
+
+    const filename = `${crypto.randomUUID()}.${detectedType.ext}`;
+    await fs.promises.writeFile(
+      path.join(uploadsDirectory, filename),
+      req.file.buffer,
+      { flag: "wx", mode: 0o640 },
+    );
+    req.file.filename = filename;
+    next();
+  } catch (error) {
+    console.error("Photo storage failed:", error);
+    res.status(500).json({ error: "Photo upload failed" });
+  }
+};
 
 // Middleware to verify JWT token
-const verifyToken = (req, res, next) => {
+const verifyToken = async (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
   if (!token) {
     return res.status(401).json({ error: "Token required" });
@@ -65,7 +144,13 @@ const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
+    const user = await db.get("SELECT id, role FROM Users WHERE id = $1", [
+      decoded.id,
+    ]);
+    if (!user || user.role === "disabled") {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+    req.user = user;
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired token" });
@@ -80,22 +165,45 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
+const isEligibleForPlan = (age, plan) =>
+  age >= plan.age_min && (plan.age_max === null || age <= plan.age_max);
+
 // ============ AUTHENTICATION ROUTES ============
 
 // Register
-app.post("/api/register", upload.single("photo"), async (req, res) => {
+app.post("/api/register", receivePhoto, storeVerifiedPhoto, async (req, res) => {
   try {
-    const { name, email, password, phone } = req.body;
+    const { name, email, password, confirmPassword, phone, employee_id } = req.body;
+    const ageInput = req.body.age;
+    const age = Number(ageInput);
+    const employeeId = typeof employee_id === "string" ? employee_id.trim() : "";
     const photoPath = req.file ? `/uploads/${req.file.filename}` : null;
 
-    if (!name || !email || !password) {
+    if (
+      !name ||
+      !email ||
+      !password ||
+      !confirmPassword ||
+      !phone ||
+      ageInput === undefined ||
+      ageInput === "" ||
+      !employeeId
+    ) {
       return res
         .status(400)
-        .json({ error: "Name, email, and password are required" });
+        .json({ error: "All registration fields are required" });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({ error: "Passwords do not match" });
+    }
+
+    if (!Number.isInteger(age) || age < 0 || age > 120) {
+      return res.status(400).json({ error: "Enter a valid age" });
     }
 
     // Check if user already exists
-    const existing = await db.get("SELECT id FROM Users WHERE email = ?", [
+    const existing = await db.get("SELECT id FROM Users WHERE email = $1", [
       email,
     ]);
     if (existing) {
@@ -103,15 +211,20 @@ app.post("/api/register", upload.single("photo"), async (req, res) => {
     }
 
     const hashedPassword = bcrypt.hashSync(password, 10);
-    const result = await db.run(
-      "INSERT INTO Users (name, email, password_hash, phone, photo_path, role) VALUES (?, ?, ?, ?, ?, ?)",
-      [name, email, hashedPassword, phone, photoPath, "member"],
-    );
+    const user = await db.transaction(async (client) => {
+      const result = await client.query(
+        "INSERT INTO Users (name, email, password_hash, phone, age, employee_id, photo_path, role) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, name, email, age, employee_id, role",
+        [name, email, hashedPassword, phone, age, employeeId, photoPath, "member"],
+      );
+      const newUser = result.rows[0];
 
-    const user = await db.get(
-      "SELECT id, name, email, role FROM Users WHERE id = ?",
-      [result.lastID],
-    );
+      await client.query(
+        "INSERT INTO FamilyMembers (user_id, name, age, photo_path) VALUES ($1, $2, $3, $4)",
+        [newUser.id, newUser.name, newUser.age, photoPath],
+      );
+
+      return newUser;
+    });
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, {
       expiresIn: "30d",
@@ -125,26 +238,44 @@ app.post("/api/register", upload.single("photo"), async (req, res) => {
 });
 
 // Login
-app.post("/api/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many login attempts. Please try again later." },
+});
 
-    if (!email || !password) {
+app.post("/api/login", loginLimiter, async (req, res) => {
+  try {
+    const email = typeof req.body.email === "string"
+      ? req.body.email.trim().toLowerCase()
+      : "";
+    const { password } = req.body;
+
+    if (!email || typeof password !== "string" || !password) {
       return res.status(400).json({ error: "Email and password required" });
     }
 
     const user = await db.get(
-      "SELECT id, name, email, password_hash, role FROM Users WHERE email = ?",
+      "SELECT id, name, email, password_hash, role FROM Users WHERE LOWER(email) = $1",
       [email],
     );
+    const passwordMatches = await bcrypt.compare(
+      password,
+      user?.password_hash || DUMMY_PASSWORD_HASH,
+    );
 
-    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    if (!user || user.role === "disabled" || !passwordMatches) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, {
-      expiresIn: "30d",
-    });
+    const token = jwt.sign(
+      { id: user.id, role: user.role },
+      JWT_SECRET,
+      { expiresIn: user.role === "admin" ? "1h" : "30d" },
+    );
 
     res.json({
       message: "Login successful",
@@ -168,26 +299,28 @@ app.post("/api/login", async (req, res) => {
 app.post(
   "/api/family-members",
   verifyToken,
-  upload.single("photo"),
+  receivePhoto,
+  storeVerifiedPhoto,
   async (req, res) => {
     try {
-      const { name, date_of_birth } = req.body;
+      const { name } = req.body;
+      const age = Number(req.body.age);
       const photoPath = req.file ? `/uploads/${req.file.filename}` : null;
       const userId = req.user.id;
 
-      if (!name || !date_of_birth) {
+      if (!name || req.body.age === undefined || req.body.age === "" || !Number.isInteger(age) || age < 0 || age > 120) {
         return res
           .status(400)
-          .json({ error: "Name and date of birth are required" });
+          .json({ error: "Name and a valid age are required" });
       }
 
       const result = await db.run(
-        "INSERT INTO FamilyMembers (user_id, name, date_of_birth, photo_path) VALUES (?, ?, ?, ?)",
-        [userId, name, date_of_birth, photoPath],
+        "INSERT INTO FamilyMembers (user_id, name, age, photo_path) VALUES ($1, $2, $3, $4) RETURNING id",
+        [userId, name, age, photoPath],
       );
 
       const member = await db.get(
-        "SELECT id, name, date_of_birth, photo_path FROM FamilyMembers WHERE id = ?",
+        "SELECT id, name, age, photo_path FROM FamilyMembers WHERE id = $1",
         [result.lastID],
       );
 
@@ -203,7 +336,7 @@ app.post(
 app.get("/api/family-members", verifyToken, async (req, res) => {
   try {
     const members = await db.all(
-      "SELECT id, name, date_of_birth, photo_path FROM FamilyMembers WHERE user_id = ?",
+      "SELECT id, name, age, photo_path FROM FamilyMembers WHERE user_id = $1",
       [req.user.id],
     );
 
@@ -220,7 +353,7 @@ app.get("/api/family-members", verifyToken, async (req, res) => {
 app.get("/api/plans", async (req, res) => {
   try {
     const plans = await db.all(
-      "SELECT id, name, child_price, adult_price, senior_price, duration_days FROM Plans",
+      "SELECT id, duration_days, age_min, age_max, duration_type, price FROM Plans WHERE is_active = 1 ORDER BY duration_days, age_min, id",
     );
     res.json(plans);
   } catch (err) {
@@ -232,7 +365,7 @@ app.get("/api/plans", async (req, res) => {
 // Get Razorpay Key
 app.get("/api/razorpay-key", (req, res) => {
   res.json({
-    keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_1DP5MMOk92gagR",
+    keyId: razorpayKeyId || null,
   });
 });
 
@@ -251,7 +384,7 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
 
     // Get family member
     const member = await db.get(
-      "SELECT name, date_of_birth, user_id FROM FamilyMembers WHERE id = ?",
+      "SELECT name, age, user_id FROM FamilyMembers WHERE id = $1",
       [family_member_id],
     );
 
@@ -265,7 +398,7 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
 
     // Get plan
     const plan = await db.get(
-      "SELECT id, name, child_price, adult_price, senior_price, duration_days FROM Plans WHERE id = ?",
+      "SELECT id, duration_days, age_min, age_max, duration_type, price FROM Plans WHERE id = $1",
       [plan_id],
     );
 
@@ -273,19 +406,13 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
       return res.status(404).json({ error: "Plan not found" });
     }
 
-    // Calculate age and price
-    const dob = new Date(member.date_of_birth);
-    const today = new Date();
-    let age = today.getFullYear() - dob.getFullYear();
-    const hasBirthday =
-      today.getMonth() > dob.getMonth() ||
-      (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate());
-    if (!hasBirthday) age--;
-
-    let price;
-    if (age < 12) price = plan.child_price;
-    else if (age >= 60) price = plan.senior_price;
-    else price = plan.adult_price;
+    const age = member.age;
+    if (!isEligibleForPlan(age, plan)) {
+      return res.status(400).json({
+        error: `This plan is available for ages ${plan.age_min}${plan.age_max === null ? "+" : `-${plan.age_max}`} only`,
+      });
+    }
+    const price = plan.price;
 
     // Create Razorpay order
     let order;
@@ -300,6 +427,13 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
         };
         console.log("Mock order created:", order.id);
       } else {
+        if (!razorpay) {
+          return res.status(500).json({
+            error:
+              "Razorpay is not configured. Set both RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env.",
+          });
+        }
+
         // Real Razorpay order
         order = await razorpay.orders.create({
           amount: Math.round(price * 100), // Razorpay expects amount in paise
@@ -314,12 +448,15 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
         console.log("Real Razorpay order created:", order.id);
       }
     } catch (paymentErr) {
-      console.error("Razorpay Error:", paymentErr.message);
-      return res
-        .status(500)
-        .json({
-          error: `Payment gateway error: ${paymentErr.message}. Make sure RAZORPAY_KEY_SECRET is set in .env`,
-        });
+      const paymentMessage =
+        paymentErr?.error?.description ||
+        paymentErr?.message ||
+        "Unknown Razorpay error";
+
+      console.error("Razorpay Error:", paymentMessage);
+      return res.status(500).json({
+        error: `Payment gateway error: ${paymentMessage}`,
+      });
     }
 
     res.json({
@@ -327,9 +464,9 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
       amount: price,
       currency: "INR",
       memberName: member.name,
-      planName: plan.name,
       age,
       durationDays: plan.duration_days,
+      durationType: plan.duration_type,
     });
   } catch (err) {
     console.error(err);
@@ -350,9 +487,15 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
 
     // Verify signature (skip in mock mode)
     if (!isMockMode) {
+      if (!razorpayKeySecret) {
+        return res.status(500).json({
+          error: "Razorpay secret is missing. Set RAZORPAY_KEY_SECRET in .env.",
+        });
+      }
+
       const body = razorpay_order_id + "|" + razorpay_payment_id;
       const expectedSignature = crypto
-        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+        .createHmac("sha256", razorpayKeySecret)
         .update(body)
         .digest("hex");
 
@@ -365,15 +508,20 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
 
     // Get family member and plan
     const member = await db.get(
-      "SELECT user_id FROM FamilyMembers WHERE id = ?",
+      "SELECT user_id, age FROM FamilyMembers WHERE id = $1",
       [family_member_id],
     );
-    const plan = await db.get("SELECT duration_days FROM Plans WHERE id = ?", [
-      plan_id,
-    ]);
+    const plan = await db.get(
+      "SELECT duration_days, age_min, age_max FROM Plans WHERE id = $1",
+      [plan_id],
+    );
 
     if (!member || !plan || member.user_id !== req.user.id) {
       return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    if (!isEligibleForPlan(member.age, plan)) {
+      return res.status(400).json({ error: "Member is not eligible for this plan" });
     }
 
     // Create subscription
@@ -385,7 +533,7 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
       .split("T")[0];
 
     const subscription = await db.run(
-      "INSERT INTO Subscriptions (family_member_id, plan_id, start_date, end_date, payment_id, status) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO Subscriptions (family_member_id, plan_id, start_date, end_date, payment_id, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
       [
         family_member_id,
         plan_id,
@@ -401,7 +549,7 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
     const expiresAt = endDate;
 
     await db.run(
-      "INSERT INTO QRCodes (subscription_id, token, expires_at, is_valid) VALUES (?, ?, ?, ?)",
+      "INSERT INTO QRCodes (subscription_id, token, expires_at, is_valid) VALUES ($1, $2, $3, $4)",
       [subscription.lastID, qrToken, expiresAt, 1],
     );
 
@@ -444,12 +592,15 @@ app.get("/api/my-qrcodes", verifyToken, async (req, res) => {
         s.end_date,
         fm.name as member_name,
         fm.photo_path,
-        p.name as plan_name
+        p.age_min,
+        p.age_max,
+        p.duration_type,
+        p.duration_days
       FROM QRCodes q
       JOIN Subscriptions s ON q.subscription_id = s.id
       JOIN FamilyMembers fm ON s.family_member_id = fm.id
       JOIN Plans p ON s.plan_id = p.id
-      WHERE fm.user_id = ? AND s.status = 'active'
+      WHERE fm.user_id = $1 AND s.status = 'active'
       ORDER BY q.created_at DESC
     `,
       [req.user.id],
@@ -475,6 +626,47 @@ app.get("/api/my-qrcodes", verifyToken, async (req, res) => {
 
 // ============ ADMIN ROUTES ============
 
+app.post("/api/admin/plans", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { age_min, age_max, duration_type, price } = req.body;
+    const minimumAge = Number(age_min);
+    const maximumAge = age_max === "" || age_max === null ? null : Number(age_max);
+    const planPrice = Number(price);
+    const durationDays = { daily: 1, monthly: 30, annual: 365 }[duration_type];
+
+    if (
+      !Number.isInteger(minimumAge) ||
+      minimumAge < 0 ||
+      (maximumAge !== null &&
+        (!Number.isInteger(maximumAge) || maximumAge < minimumAge)) ||
+      !durationDays ||
+      !Number.isFinite(planPrice) ||
+      planPrice <= 0
+    ) {
+      return res.status(400).json({ error: "Enter a valid age range, term, and price" });
+    }
+
+    const result = await db.run(
+      "INSERT INTO Plans (duration_days, age_min, age_max, duration_type, price) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+      [
+        durationDays,
+        minimumAge,
+        maximumAge,
+        duration_type,
+        planPrice,
+      ],
+    );
+    const plan = await db.get(
+      "SELECT id, age_min, age_max, duration_type, duration_days, price FROM Plans WHERE id = $1",
+      [result.lastID],
+    );
+    res.status(201).json(plan);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to create plan" });
+  }
+});
+
 // Get all registered users (admin only)
 app.get("/api/admin/users", verifyToken, verifyAdmin, async (req, res) => {
   try {
@@ -484,6 +676,8 @@ app.get("/api/admin/users", verifyToken, verifyAdmin, async (req, res) => {
         u.name,
         u.email,
         u.phone,
+        u.age,
+        u.employee_id,
         u.photo_path,
         u.role,
         u.created_at,
@@ -515,14 +709,16 @@ app.get(
       SELECT 
         fm.id,
         fm.name as member_name,
-        fm.date_of_birth,
+        fm.age,
         fm.photo_path,
         u.id as user_id,
         u.name as user_name,
         u.email,
         s.id as subscription_id,
         p.id as plan_id,
-        p.name as plan_name,
+        p.age_min,
+        p.age_max,
+        p.duration_type,
         s.start_date,
         s.end_date as expires_at,
         s.status
@@ -534,24 +730,7 @@ app.get(
       ORDER BY s.start_date DESC
     `);
 
-      // Calculate age
-      const result = data.map((item) => {
-        const dob = new Date(item.date_of_birth);
-        const today = new Date();
-        let age = today.getFullYear() - dob.getFullYear();
-        const hasBirthday =
-          today.getMonth() > dob.getMonth() ||
-          (today.getMonth() === dob.getMonth() &&
-            today.getDate() >= dob.getDate());
-        if (!hasBirthday) age--;
-
-        return {
-          ...item,
-          age,
-        };
-      });
-
-      res.json(result);
+      res.json(data);
     } catch (err) {
       console.error(err);
       res
@@ -579,13 +758,15 @@ app.post("/api/qr/validate", verifyToken, verifyAdmin, async (req, res) => {
         s.id as subscription_id,
         fm.name as member_name,
         fm.photo_path,
-        fm.date_of_birth,
-        p.name as plan_name
+        fm.age,
+        p.age_min,
+        p.age_max,
+        p.duration_type
       FROM QRCodes q
       JOIN Subscriptions s ON q.subscription_id = s.id
       JOIN FamilyMembers fm ON s.family_member_id = fm.id
       JOIN Plans p ON s.plan_id = p.id
-      WHERE q.token = ?
+      WHERE q.token = $1
     `,
       [token],
     );
@@ -601,7 +782,7 @@ app.post("/api/qr/validate", verifyToken, verifyAdmin, async (req, res) => {
 
     if (!qr.is_valid || today > qr.expires_at) {
       // Mark as invalid
-      await db.run("UPDATE QRCodes SET is_valid = 0 WHERE id = ?", [qr.id]);
+      await db.run("UPDATE QRCodes SET is_valid = 0 WHERE id = $1", [qr.id]);
 
       return res.json({
         valid: false,
@@ -609,24 +790,15 @@ app.post("/api/qr/validate", verifyToken, verifyAdmin, async (req, res) => {
       });
     }
 
-    // Calculate age
-    const dob = new Date(qr.date_of_birth);
-    const todayDate = new Date();
-    let age = todayDate.getFullYear() - dob.getFullYear();
-    const hasBirthday =
-      todayDate.getMonth() > dob.getMonth() ||
-      (todayDate.getMonth() === dob.getMonth() &&
-        todayDate.getDate() >= dob.getDate());
-    if (!hasBirthday) age--;
-
     res.json({
       valid: true,
       member: {
         name: qr.member_name,
         photo_path: qr.photo_path,
-        age,
-        date_of_birth: qr.date_of_birth,
-        plan: qr.plan_name,
+        age: qr.age,
+        plan_age_min: qr.age_min,
+        plan_age_max: qr.age_max,
+        plan_duration_type: qr.duration_type,
         expires_at: qr.expires_at,
       },
     });
@@ -638,11 +810,21 @@ app.post("/api/qr/validate", verifyToken, verifyAdmin, async (req, res) => {
 
 // ============ SERVER ============
 
-app.listen(PORT, () => {
-  console.log(
-    `\n🏊 Swimming Pool Management System running on http://localhost:${PORT}`,
-  );
-  console.log(`\n📱 Admin credentials:`);
-  console.log(`   Email: admin@pool.com`);
-  console.log(`   Password: admin123\n`);
-});
+db.ready
+  .then(() => {
+    const server = app.listen(PORT, () => {
+      console.log(
+        `\n🏊 Swimming Pool Management System running on http://localhost:${PORT}`,
+      );
+    });
+    server.on("error", async (error) => {
+      console.error(`Server failed to listen on port ${PORT}: ${error.message}`);
+      await db.close();
+      process.exitCode = 1;
+    });
+  })
+  .catch(async (error) => {
+    console.error("PostgreSQL initialization failed:", error);
+    await db.close();
+    process.exitCode = 1;
+  });
