@@ -9,7 +9,7 @@
   <body>
     <nav class="navbar">
       <div class="container">
-        <div class="logo">🏊 PoolManager</div>
+        <div class="logo">IITGN Swimming Pool</div>
         <ul class="nav-links">
           <li><span class="user-name"></span></li>
           <li>
@@ -21,17 +21,20 @@
 
     <main class="admin-panel">
       <div class="container">
-        <h1>🔐 Admin Panel</h1>
+        <h1>Admin Panel</h1>
 
         <div class="admin-tabs">
           <button class="tab-btn active" onclick="switchTab('scanner')">
-            📱 QR Scanner
+            QR Scanner
           </button>
           <button class="tab-btn" onclick="switchTab('users')">
-            👤 Registered Users
+            Registered Users
           </button>
           <button class="tab-btn" onclick="switchTab('members')">
-            👥 Members & Subscriptions
+            Subscriptions
+          </button>
+          <button class="tab-btn" onclick="switchTab('plans')">
+            Plans
           </button>
         </div>
 
@@ -86,7 +89,7 @@
         <!-- Members Tab -->
         <div id="members-tab" class="tab-content">
           <section class="card">
-            <h2>👥 Members & Active Subscriptions</h2>
+            <h2>Subscriptions</h2>
             <button class="btn btn-secondary" onclick="loadMembersTable()">
               Refresh
             </button>
@@ -114,10 +117,58 @@
           </section>
         </div>
 
+        <!-- Plans Tab -->
+        <div id="plans-tab" class="tab-content">
+          <section class="card">
+            <h2>Add Membership Plan</h2>
+            <form id="planForm">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="planAgeMin">Minimum age</label>
+                  <input id="planAgeMin" name="age_min" type="number" min="0" step="1" value="0" required />
+                </div>
+                <div class="form-group">
+                  <label for="planAgeMax">Maximum age (optional)</label>
+                  <input id="planAgeMax" name="age_max" type="number" min="0" step="1" placeholder="No upper limit" />
+                </div>
+                <div class="form-group">
+                  <label for="planDuration">Duration</label>
+                  <select id="planDuration" name="duration_type" required>
+                    <option value="daily">One day</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="annual">Annual</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="planPrice">Price (₹)</label>
+                  <input id="planPrice" name="price" type="number" min="0.01" step="0.01" required />
+                </div>
+                <button type="submit" class="btn btn-success">Add Plan</button>
+              </div>
+            </form>
+            <div id="planMessage" class="message" role="status"></div>
+          </section>
+
+          <section class="card">
+            <h2>Available Plans</h2>
+            <button class="btn btn-secondary" onclick="loadPlansTable()">Refresh</button>
+            <div class="table-wrapper">
+              <table class="members-table">
+                <thead>
+                  <tr><th>Age range</th><th>Duration</th><th>Price</th></tr>
+                </thead>
+                <tbody id="plansTableBody">
+                  <tr><td colspan="3" style="text-align: center">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
         <!-- Users Tab -->
         <div id="users-tab" class="tab-content">
           <section class="card">
-            <h2>👤 Registered Users</h2>
+            <h2>Registered Users</h2>
             <button class="btn btn-secondary" onclick="loadUsersTable()">
               Refresh
             </button>
@@ -129,13 +180,15 @@
                     <th>Name</th>
                     <th>Email</th>
                     <th>Phone</th>
+                    <th>Age</th>
+                    <th>Employee ID</th>
                     <th>Role</th>
                     <th>Registered On</th>
                   </tr>
                 </thead>
                 <tbody id="usersTableBody">
                   <tr>
-                    <td colspan="6" style="text-align: center">Loading...</td>
+                    <td colspan="8" style="text-align: center">Loading...</td>
                   </tr>
                 </tbody>
               </table>
@@ -146,6 +199,7 @@
     </main>
 
     <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="utils.js"></script>
 
     <script>
       const API_URL = "";
@@ -170,7 +224,7 @@
         }
 
         document.querySelector(".user-name").textContent =
-          `👤 Admin: ${user.name}`;
+          `Admin: ${user.name}`;
 
         // Check if html5-qrcode library is loaded
         setTimeout(() => {
@@ -178,6 +232,7 @@
         }, 500);
 
         updateScanHistory();
+        document.getElementById("planForm").addEventListener("submit", createPlan);
       });
 
       function checkLibraryStatus() {
@@ -340,12 +395,13 @@
           resultDiv.innerHTML = `
           <div class="result valid">
             <h3 style="color: #28a745;">✓ VALID - ENTRY ALLOWED</h3>
-            <img src="${member.photo_path || "https://via.placeholder.com/150"}" alt="${member.name}" class="member-photo">
+            <img src="${escapeHtml(member.photo_path || "https://via.placeholder.com/150")}" alt="${escapeHtml(member.name)}" class="member-photo">
             <div class="result-details">
-              <p><strong>Name:</strong> ${member.name}</p>
-              <p><strong>Age:</strong> ${age} years</p>
-              <p><strong>Plan:</strong> ${member.plan}</p>
-              <p><strong>Valid Until:</strong> ${new Date(member.expires_at).toLocaleDateString()}</p>
+              <p><strong>Name:</strong> ${escapeHtml(member.name)}</p>
+              <p><strong>Age:</strong> ${escapeHtml(age)} years</p>
+              <p><strong>Plan ages:</strong> ${escapeHtml(member.plan_age_min)}${member.plan_age_max === null ? "+" : `-${escapeHtml(member.plan_age_max)}`}</p>
+              <p><strong>Duration:</strong> ${escapeHtml({ daily: "One day", monthly: "Monthly", annual: "Annual" }[member.plan_duration_type] || "")}</p>
+              <p><strong>Valid Until:</strong> ${escapeHtml(new Date(member.expires_at).toLocaleDateString())}</p>
             </div>
           </div>
         `;
@@ -353,7 +409,7 @@
           resultDiv.innerHTML = `
           <div class="result invalid">
             <h3 style="color: #dc3545;">✗ INVALID - ENTRY DENIED</h3>
-            <p><strong>Reason:</strong> ${result.reason}</p>
+            <p><strong>Reason:</strong> ${escapeHtml(result.reason)}</p>
           </div>
         `;
         }
@@ -377,9 +433,9 @@
           .map(
             (scan, index) => `
         <div class="scan-history-item ${scan.valid ? "success" : "error"}">
-          <span class="time">${scan.timestamp}</span>
+          <span class="time">${escapeHtml(scan.timestamp)}</span>
           <span class="status">${scan.valid ? "✓ VALID" : "✗ INVALID"}</span>
-          ${scan.valid ? `<span class="name">${scan.member.name}</span>` : `<span class="reason">${scan.reason}</span>`}
+          ${scan.valid ? `<span class="name">${escapeHtml(scan.member.name)}</span>` : `<span class="reason">${escapeHtml(scan.reason)}</span>`}
         </div>
       `,
           )
@@ -408,6 +464,59 @@
           loadUsersTable();
         } else if (tabName === "members") {
           loadMembersTable();
+        } else if (tabName === "plans") {
+          loadPlansTable();
+        }
+      }
+
+      async function createPlan(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const formData = new FormData(form);
+        const plan = Object.fromEntries(formData.entries());
+        const responseMessage = document.getElementById("planMessage");
+
+        try {
+          const response = await fetch(`${API_URL}/api/admin/plans`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+            body: JSON.stringify(plan),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Failed to add plan");
+
+          form.reset();
+          document.getElementById("planAgeMin").value = "0";
+          responseMessage.innerHTML = '<div class="alert alert-success">Plan added and available to members.</div>';
+          loadPlansTable();
+          setTimeout(() => { responseMessage.innerHTML = ""; }, 4000);
+        } catch (error) {
+          responseMessage.innerHTML = `<div class="alert alert-error">${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      async function loadPlansTable() {
+        const tbody = document.getElementById("plansTableBody");
+        try {
+          const response = await fetch(`${API_URL}/api/plans`);
+          const plans = await response.json();
+          if (!response.ok) throw new Error("Failed to load plans");
+          if (plans.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align: center">No plans available.</td></tr>';
+            return;
+          }
+
+          tbody.innerHTML = plans.map((plan) => {
+            const ageRange = plan.age_max === null ? `${plan.age_min}+` : `${plan.age_min}-${plan.age_max}`;
+            const duration = { daily: "One day", monthly: "Monthly", annual: "Annual" }[plan.duration_type] || `${plan.duration_days} days`;
+            const price = `₹${Number(plan.price).toFixed(2)}`;
+            return `<tr><td>${escapeHtml(ageRange)}</td><td>${escapeHtml(duration)}</td><td>${escapeHtml(price)}</td></tr>`;
+          }).join("");
+        } catch (error) {
+          tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: red">Unable to load plans.</td></tr>';
         }
       }
 
@@ -424,7 +533,7 @@
 
           if (!data || data.length === 0) {
             tbody.innerHTML =
-              '<tr><td colspan="6" style="text-align: center;">No registered users found.</td></tr>';
+              '<tr><td colspan="8" style="text-align: center;">No registered users found.</td></tr>';
             return;
           }
 
@@ -434,16 +543,18 @@
                 user.created_at,
               ).toLocaleDateString();
               const roleLabel =
-                user.role === "admin" ? "🔐 Admin" : "👤 Member";
+                user.role === "admin" ? "Admin" : "Member";
 
               return `
             <tr>
-              <td><img src="${user.photo_path || "https://via.placeholder.com/50"}" alt="${user.name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
-              <td>${user.name}</td>
-              <td>${user.email}</td>
-              <td>${user.phone || "N/A"}</td>
-              <td><span class="role-badge ${user.role}">${roleLabel}</span></td>
-              <td>${registeredDate}</td>
+              <td><img src="${escapeHtml(user.photo_path || "https://via.placeholder.com/50")}" alt="${escapeHtml(user.name)}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
+              <td>${escapeHtml(user.name)}</td>
+              <td>${escapeHtml(user.email)}</td>
+              <td>${escapeHtml(user.phone || "N/A")}</td>
+              <td>${escapeHtml(user.age ?? "N/A")}</td>
+              <td>${escapeHtml(user.employee_id || "N/A")}</td>
+              <td><span class="role-badge ${escapeHtml(user.role)}">${roleLabel}</span></td>
+              <td>${escapeHtml(registeredDate)}</td>
             </tr>
           `;
             })
@@ -451,7 +562,7 @@
         } catch (err) {
           console.error("Error loading users table:", err);
           document.getElementById("usersTableBody").innerHTML =
-            '<tr><td colspan="6" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
+            '<tr><td colspan="8" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
         }
       }
 
@@ -494,13 +605,13 @@
 
               return `
             <tr>
-              <td><img src="${sub.photo_path || "https://via.placeholder.com/50"}" alt="${sub.member_name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
-              <td>${sub.member_name}</td>
-              <td>${sub.age}</td>
-              <td>${sub.user_name}</td>
-              <td>${sub.plan_name}</td>
-              <td>${new Date(sub.start_date).toLocaleDateString()}</td>
-              <td>${expiryDate.toLocaleDateString()}</td>
+              <td><img src="${escapeHtml(sub.photo_path || "https://via.placeholder.com/50")}" alt="${escapeHtml(sub.member_name)}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
+              <td>${escapeHtml(sub.member_name)}</td>
+              <td>${escapeHtml(sub.age)}</td>
+              <td>${escapeHtml(sub.user_name)}</td>
+              <td>Ages ${escapeHtml(sub.age_min)}${sub.age_max === null ? "+" : `-${escapeHtml(sub.age_max)}`} · ${escapeHtml({ daily: "One day", monthly: "Monthly", annual: "Annual" }[sub.duration_type] || "")}</td>
+              <td>${escapeHtml(new Date(sub.start_date).toLocaleDateString())}</td>
+              <td>${escapeHtml(expiryDate.toLocaleDateString())}</td>
               <td><span class="status-badge ${isExpired ? "expired" : "active"}">${isExpired ? "❌ Expired" : `✓ ${daysLeft}d`}</span></td>
             </tr>
           `;
@@ -510,44 +621,6 @@
           console.error("Error loading members table:", err);
           document.getElementById("membersTableBody").innerHTML =
             '<tr><td colspan="8" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
-        }
-      }
-
-      async function loadUsersTable() {
-        try {
-          const response = await fetch(`${API_URL}/api/admin/users`, {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
-          });
-
-          const data = await response.json();
-          const tbody = document.getElementById("usersTableBody");
-
-          if (!data || data.length === 0) {
-            tbody.innerHTML =
-              '<tr><td colspan="6" style="text-align: center;">No registered users found.</td></tr>';
-            return;
-          }
-
-          tbody.innerHTML = data
-            .map((user) => {
-              return `
-            <tr>
-              <td><img src="${user.photo_path || "https://via.placeholder.com/50"}" alt="${user.name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
-              <td><strong>${user.name}</strong></td>
-              <td>${user.email}</td>
-              <td>${user.phone || "N/A"}</td>
-              <td><span style="background: #e3f2fd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${user.role}</span></td>
-              <td>${new Date(user.created_at).toLocaleDateString()}</td>
-            </tr>
-          `;
-            })
-            .join("");
-        } catch (err) {
-          console.error("Error loading users table:", err);
-          document.getElementById("usersTableBody").innerHTML =
-            '<tr><td colspan="6" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
         }
       }
 
