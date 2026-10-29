@@ -3,13 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Login - PoolManager</title>
+    <title>Login - IITGN Swimming Pool</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <nav class="navbar">
       <div class="container">
-        <div class="logo">🏊 PoolManager</div>
+        <div class="logo">IITGN Swimming Pool</div>
         <ul class="nav-links">
           <li><a href="index.html">Home</a></li>
           <li><a href="register.html" class="btn btn-success">Register</a></li>
@@ -40,19 +40,6 @@
               Don't have an account? <a href="register.html">Register here</a>
             </p>
 
-            <hr />
-
-            <div class="demo-login">
-              <h4>Demo Credentials</h4>
-              <p><strong>Admin:</strong> admin@pool.com / admin123</p>
-              <button
-                type="button"
-                class="btn btn-secondary btn-block"
-                onclick="demoLogin('admin@pool.com', 'admin123')"
-              >
-                Login as Admin
-              </button>
-            </div>
           </form>
 
           <div id="message" class="message"></div>
@@ -60,14 +47,9 @@
       </div>
     </main>
 
+    <script src="utils.js"></script>
     <script>
       const API_URL = "";
-
-      function demoLogin(email, password) {
-        document.getElementById("email").value = email;
-        document.getElementById("password").value = password;
-        document.getElementById("loginForm").dispatchEvent(new Event("submit"));
-      }
 
       document
         .getElementById("loginForm")
@@ -105,7 +87,7 @@
               }
             } else {
               document.getElementById("message").innerHTML =
-                `<div class="alert alert-error">${data.error}</div>`;
+                `<div class="alert alert-error">${escapeHtml(data.error)}</div>`;
             }
           } catch (err) {
             console.error(err);

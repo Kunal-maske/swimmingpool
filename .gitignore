@@ -2,7 +2,6 @@ node_modules/
 .env
 .env.local
 .env.*.local
-pool.db
 uploads/
 .DS_Store
 .vscode/
