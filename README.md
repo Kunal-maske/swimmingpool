@@ -68,6 +68,8 @@ The `ADMIN_EMAIL` and `ADMIN_PASSWORD` values create the first administrator whe
 
 The `.env.example` includes placeholder Razorpay values. Leaving them unchanged (or leaving the Razorpay variables unset) enables mock checkout for local testing. To use Razorpay test mode, set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to test credentials from your Razorpay dashboard. Do not use live credentials for local testing.
 
+For a deployment, set `NODE_ENV=production`, provide valid Razorpay credentials, and leave `ENABLE_MOCK_PAYMENTS=false`. Production startup fails closed if payment credentials are missing. Set `UPLOAD_DIR` to persistent storage and configure `TRUST_PROXY_HOPS` for the hosting provider's proxy chain.
+
 ### 3. Start the server
 
 ```bash
@@ -94,6 +96,8 @@ To run with the development script instead, use `npm run dev`. Both scripts star
 | `RAZORPAY_KEY_ID` | Razorpay key ID | Optional; mock checkout if payment credentials are not configured |
 | `RAZORPAY_KEY_SECRET` | Razorpay key secret | Optional; mock checkout if payment credentials are not configured |
 | `TRUST_PROXY_HOPS` | Number of trusted reverse-proxy hops | `0` for local development |
+| `NODE_ENV` | Runtime environment | `development` |
+| `ENABLE_MOCK_PAYMENTS` | Allows simulated checkout | `false`; never enable accidentally in production |
 
 ## Project Structure
 
@@ -113,3 +117,5 @@ To run with the development script instead, use `npm run dev`. Both scripts star
 - Browser camera access for QR scanning may require permission. Localhost is generally treated as a secure context; deployed sites should use HTTPS.
 - Do not commit `.env` or real payment credentials. The repository's `.gitignore` excludes `.env` and uploaded files.
 - For deployment, use a persistent writable upload directory and configure `TRUST_PROXY_HOPS` to match the trusted proxy setup. See [POSTGRESQL.md](POSTGRESQL.md) for additional operational guidance.
+- Platform health probes can use `/healthz` for process health and `/readyz` for PostgreSQL readiness.
+- A production container can be built with `docker build -t pool-manager .` and run with `docker run --env-file .env -p 3000:3000 pool-manager`.

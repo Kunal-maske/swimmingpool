@@ -125,6 +125,18 @@ class Database {
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (subscription_id) REFERENCES Subscriptions(id)
       );
+
+      CREATE TABLE IF NOT EXISTS PaymentOrders (
+        id SERIAL PRIMARY KEY,
+        order_id TEXT UNIQUE NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES Users(id),
+        family_member_id INTEGER NOT NULL REFERENCES FamilyMembers(id),
+        plan_id INTEGER NOT NULL REFERENCES Plans(id),
+        amount NUMERIC(12, 2) NOT NULL,
+        status TEXT NOT NULL DEFAULT 'created',
+        payment_id TEXT UNIQUE,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     const demoAdmin = await this.get(

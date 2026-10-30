@@ -24,7 +24,11 @@ if (
 const db = require("./database");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const isProduction = process.env.NODE_ENV === "production";
+const PORT = Number(process.env.PORT || 3000);
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  throw new Error("PORT must be an integer between 1 and 65535");
+}
 const uploadsDirectory = path.resolve(
   process.env.UPLOAD_DIR || path.join(__dirname, "uploads"),
 );
@@ -53,6 +57,12 @@ const hasValidRazorpayConfig =
 
 const isMockMode = !hasValidRazorpayConfig;
 
+if (isProduction && isMockMode && process.env.ENABLE_MOCK_PAYMENTS !== "true") {
+  throw new Error(
+    "Production requires valid Razorpay credentials. Set ENABLE_MOCK_PAYMENTS=true only for a deliberate non-production deployment.",
+  );
+}
+
 const razorpay = hasValidRazorpayConfig
   ? new Razorpay({
       key_id: razorpayKeyId,
@@ -68,7 +78,22 @@ if (isMockMode) {
 
 // Middleware
 app.disable("x-powered-by");
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://checkout.razorpay.com", "https://unpkg.com"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:", "blob:"],
+      connectSrc: ["'self'", "https://api.razorpay.com"],
+      frameSrc: ["'self'", "https://api.razorpay.com", "https://checkout.razorpay.com"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    },
+  },
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ limit: "100kb", extended: false }));
 app.use(express.static(path.join(__dirname, "public"), { dotfiles: "deny" }));
@@ -76,6 +101,18 @@ app.use(
   "/uploads",
   express.static(uploadsDirectory, { dotfiles: "deny", index: false }),
 );
+
+app.get("/healthz", (req, res) => res.json({ status: "ok" }));
+app.get("/readyz", async (req, res) => {
+  try {
+    await db.ready;
+    await db.get("SELECT 1");
+    res.json({ status: "ready" });
+  } catch (error) {
+    console.error("Readiness check failed:", error);
+    res.status(503).json({ status: "not ready" });
+  }
+});
 
 // Create uploads directory if it doesn't exist
 fs.mkdirSync(uploadsDirectory, { recursive: true, mode: 0o750 });
@@ -173,7 +210,9 @@ const isEligibleForPlan = (age, plan) =>
 // Register
 app.post("/api/register", receivePhoto, storeVerifiedPhoto, async (req, res) => {
   try {
-    const { name, email, password, confirmPassword, phone, employee_id } = req.body;
+    const { password, confirmPassword, phone, employee_id } = req.body;
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
     const ageInput = req.body.age;
     const age = Number(ageInput);
     const employeeId = typeof employee_id === "string" ? employee_id.trim() : "";
@@ -196,6 +235,14 @@ app.post("/api/register", receivePhoto, storeVerifiedPhoto, async (req, res) => 
 
     if (password !== confirmPassword) {
       return res.status(400).json({ error: "Passwords do not match" });
+    }
+
+    if (password.length < 8 || password.length > 128) {
+      return res.status(400).json({ error: "Password must be between 8 and 128 characters" });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: "Enter a valid email address" });
     }
 
     if (!Number.isInteger(age) || age < 0 || age > 120) {
@@ -398,7 +445,7 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
 
     // Get plan
     const plan = await db.get(
-      "SELECT id, duration_days, age_min, age_max, duration_type, price FROM Plans WHERE id = $1",
+      "SELECT id, duration_days, age_min, age_max, duration_type, price FROM Plans WHERE id = $1 AND is_active = 1",
       [plan_id],
     );
 
@@ -459,6 +506,11 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
       });
     }
 
+    await db.run(
+      "INSERT INTO PaymentOrders (order_id, user_id, family_member_id, plan_id, amount) VALUES ($1, $2, $3, $4, $5)",
+      [order.id, req.user.id, family_member_id, plan_id, Number(price)],
+    );
+
     res.json({
       orderId: order.id,
       amount: price,
@@ -470,7 +522,7 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: `Order creation failed: ${err.message}` });
+    res.status(500).json({ error: "Order creation failed" });
   }
 });
 
@@ -485,9 +537,23 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
       plan_id,
     } = req.body;
 
-    // Verify signature (skip in mock mode)
+    if (!razorpay_order_id || !family_member_id || !plan_id) {
+      return res.status(400).json({ error: "Payment order, member, and plan are required" });
+    }
+
+    const paymentOrder = await db.get(
+      "SELECT id, user_id, family_member_id, plan_id, amount, status FROM PaymentOrders WHERE order_id = $1",
+      [razorpay_order_id],
+    );
+    if (!paymentOrder || paymentOrder.user_id !== req.user.id ||
+        paymentOrder.family_member_id !== Number(family_member_id) ||
+        paymentOrder.plan_id !== Number(plan_id) || paymentOrder.status !== "created") {
+      return res.status(400).json({ error: "Invalid or already processed payment order" });
+    }
+
+    // Verify signature (skip only in explicitly permitted mock mode)
     if (!isMockMode) {
-      if (!razorpayKeySecret) {
+      if (!razorpayKeySecret || !razorpay_payment_id || !razorpay_signature) {
         return res.status(500).json({
           error: "Razorpay secret is missing. Set RAZORPAY_KEY_SECRET in .env.",
         });
@@ -499,7 +565,9 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
         .update(body)
         .digest("hex");
 
-      if (expectedSignature !== razorpay_signature) {
+      const expected = Buffer.from(expectedSignature, "utf8");
+      const received = Buffer.from(razorpay_signature, "utf8");
+      if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
         return res.status(400).json({ error: "Payment verification failed" });
       }
     } else {
@@ -512,12 +580,16 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
       [family_member_id],
     );
     const plan = await db.get(
-      "SELECT duration_days, age_min, age_max FROM Plans WHERE id = $1",
+      "SELECT duration_days, age_min, age_max, is_active, price FROM Plans WHERE id = $1",
       [plan_id],
     );
 
-    if (!member || !plan || member.user_id !== req.user.id) {
+    if (!member || !plan || !plan.is_active || member.user_id !== req.user.id) {
       return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    if (Number(paymentOrder.amount) !== Number(plan.price)) {
+      return res.status(400).json({ error: "Payment amount no longer matches the selected plan" });
     }
 
     if (!isEligibleForPlan(member.age, plan)) {
@@ -532,17 +604,18 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
       .toISOString()
       .split("T")[0];
 
-    const subscription = await db.run(
-      "INSERT INTO Subscriptions (family_member_id, plan_id, start_date, end_date, payment_id, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-      [
-        family_member_id,
-        plan_id,
-        startDate,
-        endDate,
-        razorpay_payment_id || `mock_${Date.now()}`,
-        "active",
-      ],
-    );
+    const paymentId = razorpay_payment_id || `mock_${Date.now()}`;
+    const subscription = await db.transaction(async (client) => {
+      const inserted = await client.query(
+        "INSERT INTO Subscriptions (family_member_id, plan_id, start_date, end_date, payment_id, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+        [family_member_id, plan_id, startDate, endDate, paymentId, "active"],
+      );
+      await client.query(
+        "UPDATE PaymentOrders SET status = 'paid', payment_id = $1 WHERE id = $2",
+        [paymentId, paymentOrder.id],
+      );
+      return { lastID: inserted.rows[0].id };
+    });
 
     // Generate QR code token
     const qrToken = uuidv4();
@@ -572,9 +645,7 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res
-      .status(500)
-      .json({ error: `Payment verification failed: ${err.message}` });
+    res.status(500).json({ error: "Payment verification failed" });
   }
 });
 
@@ -694,7 +765,7 @@ app.get("/api/admin/users", verifyToken, verifyAdmin, async (req, res) => {
     res.json(users);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: `Failed to fetch users: ${err.message}` });
+      res.status(500).json({ error: "Failed to fetch users" });
   }
 });
 
@@ -733,9 +804,7 @@ app.get(
       res.json(data);
     } catch (err) {
       console.error(err);
-      res
-        .status(500)
-        .json({ error: `Failed to fetch members: ${err.message}` });
+      res.status(500).json({ error: "Failed to fetch members" });
     }
   },
 );
@@ -810,16 +879,29 @@ app.post("/api/qr/validate", verifyToken, verifyAdmin, async (req, res) => {
 
 // ============ SERVER ============
 
+let server;
+
+const shutdown = async (signal) => {
+  console.log(`${signal} received; shutting down`);
+  if (server) {
+    await new Promise((resolve) => server.close(resolve));
+  }
+  await db.close();
+};
+
+process.once("SIGTERM", () => shutdown("SIGTERM").finally(() => process.exit(0)));
+process.once("SIGINT", () => shutdown("SIGINT").finally(() => process.exit(0)));
+
 db.ready
   .then(() => {
-    const server = app.listen(PORT, () => {
+    server = app.listen(PORT, "0.0.0.0", () => {
       console.log(
         `\n🏊 Swimming Pool Management System running on http://localhost:${PORT}`,
       );
     });
     server.on("error", async (error) => {
       console.error(`Server failed to listen on port ${PORT}: ${error.message}`);
-      await db.close();
+      await shutdown("listen error");
       process.exitCode = 1;
     });
   })
