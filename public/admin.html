@@ -45,6 +45,14 @@
 
             <div id="libraryStatus" class="message"></div>
 
+            <div class="form-group">
+              <label for="cameraFacingMode">Camera</label>
+              <select id="cameraFacingMode">
+                <option value="user" selected>Front camera</option>
+                <option value="environment">Back camera</option>
+              </select>
+            </div>
+
             <div class="scanner-controls">
               <button
                 type="button"
@@ -93,14 +101,20 @@
             <button class="btn btn-secondary" onclick="loadMembersTable()">
               Refresh
             </button>
+            <button class="btn btn-primary" type="button" onclick="downloadSubscriptionsCsv()">
+              Download CSV
+            </button>
+            <div id="subscriptionExportMessage" class="message" role="status"></div>
             <div class="table-wrapper">
               <table class="members-table">
                 <thead>
                   <tr>
                     <th>Photo</th>
                     <th>Member Name</th>
-                    <th>Age</th>
+                    <th>Type</th>
+                    <th>Date of birth</th>
                     <th>User</th>
+                    <th>Account type</th>
                     <th>Plan</th>
                     <th>Start Date</th>
                     <th>Expiry Date</th>
@@ -109,7 +123,7 @@
                 </thead>
                 <tbody id="membersTableBody">
                   <tr>
-                    <td colspan="8" style="text-align: center">Loading...</td>
+                    <td colspan="10" style="text-align: center">Loading...</td>
                   </tr>
                 </tbody>
               </table>
@@ -123,6 +137,13 @@
             <h2>Add Membership Plan</h2>
             <form id="planForm">
               <div class="form-row">
+                <div class="form-group">
+                  <label for="planAudience">Available to</label>
+                  <select id="planAudience" name="audience" required>
+                    <option value="faculty">Faculty</option>
+                    <option value="outside">Outside members</option>
+                  </select>
+                </div>
                 <div class="form-group">
                   <label for="planAgeMin">Minimum age</label>
                   <input id="planAgeMin" name="age_min" type="number" min="0" step="1" value="0" required />
@@ -155,10 +176,10 @@
             <div class="table-wrapper">
               <table class="members-table">
                 <thead>
-                  <tr><th>Age range</th><th>Duration</th><th>Price</th></tr>
+                  <tr><th>Audience</th><th>Age range</th><th>Duration</th><th>Price</th></tr>
                 </thead>
                 <tbody id="plansTableBody">
-                  <tr><td colspan="3" style="text-align: center">Loading...</td></tr>
+                  <tr><td colspan="4" style="text-align: center">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -180,7 +201,10 @@
                     <th>Name</th>
                     <th>Email</th>
                     <th>Phone</th>
-                    <th>Age</th>
+                    <th>Date of birth</th>
+                    <th>Account type</th>
+                    <th>Family members</th>
+                    <th>Guests</th>
                     <th>Employee ID</th>
                     <th>Role</th>
                     <th>Registered On</th>
@@ -188,7 +212,7 @@
                 </thead>
                 <tbody id="usersTableBody">
                   <tr>
-                    <td colspan="8" style="text-align: center">Loading...</td>
+                    <td colspan="11" style="text-align: center">Loading...</td>
                   </tr>
                 </tbody>
               </table>
@@ -254,6 +278,9 @@
 
       function startScanner() {
         const reader = document.getElementById("reader");
+        const startButton = document.getElementById("startBtn");
+        const stopButton = document.getElementById("stopBtn");
+        const cameraSelector = document.getElementById("cameraFacingMode");
 
         if (!libraryLoaded) {
           alert("QR Scanner library is not loaded. Please refresh the page.");
@@ -261,8 +288,9 @@
         }
 
         reader.style.display = "block";
-        document.getElementById("startBtn").disabled = true;
-        document.getElementById("stopBtn").disabled = false;
+        startButton.disabled = true;
+        stopButton.disabled = false;
+        cameraSelector.disabled = true;
 
         try {
           if (typeof Html5Qrcode === "undefined") {
@@ -279,7 +307,7 @@
 
           scanner
             .start(
-              { facingMode: "environment" },
+              { facingMode: cameraSelector.value },
               {
                 fps: 10,
                 qrbox: { width: 250, height: 250 },
@@ -298,34 +326,44 @@
               );
               reader.style.display = "none";
               scanner = null;
-              document.getElementById("startBtn").disabled = false;
-              document.getElementById("stopBtn").disabled = true;
+              startButton.disabled = false;
+              stopButton.disabled = true;
+              cameraSelector.disabled = false;
             });
         } catch (err) {
           console.error("Scanner initialization error:", err);
           alert("Failed to initialize scanner: " + err.message);
           reader.style.display = "none";
-          document.getElementById("startBtn").disabled = false;
-          document.getElementById("stopBtn").disabled = true;
+          scanner = null;
+          startButton.disabled = false;
+          stopButton.disabled = true;
+          cameraSelector.disabled = false;
         }
       }
 
       function stopScanner() {
         if (scanner) {
+          const startButton = document.getElementById("startBtn");
+          const stopButton = document.getElementById("stopBtn");
+          const cameraSelector = document.getElementById("cameraFacingMode");
           scanner
             .stop()
             .then(() => {
               document.getElementById("reader").style.display = "none";
               scanner = null;
               console.log("✓ Scanner stopped");
-              document.getElementById("startBtn").disabled = false;
-              document.getElementById("stopBtn").disabled = true;
+              startButton.disabled = false;
+              stopButton.disabled = true;
+              cameraSelector.disabled = false;
             })
             .catch((err) => {
               console.error("Error stopping scanner:", err);
+              alert("Failed to stop camera: " + err.message);
               scanner = null;
-              document.getElementById("startBtn").disabled = false;
-              document.getElementById("stopBtn").disabled = true;
+              document.getElementById("reader").style.display = "none";
+              startButton.disabled = false;
+              stopButton.disabled = true;
+              cameraSelector.disabled = false;
             });
         }
       }
@@ -391,14 +429,14 @@
 
         if (result.valid) {
           const member = result.member;
-          const age = member.age;
           resultDiv.innerHTML = `
           <div class="result valid">
             <h3 style="color: #28a745;">✓ VALID - ENTRY ALLOWED</h3>
             <img src="${escapeHtml(member.photo_path || "https://via.placeholder.com/150")}" alt="${escapeHtml(member.name)}" class="member-photo">
             <div class="result-details">
               <p><strong>Name:</strong> ${escapeHtml(member.name)}</p>
-              <p><strong>Age:</strong> ${escapeHtml(age)} years</p>
+              <p><strong>Type:</strong> ${escapeHtml(participantTypeLabel(member.member_type))}</p>
+              <p><strong>Date of birth:</strong> ${escapeHtml(member.date_of_birth || "N/A")}</p>
               <p><strong>Plan ages:</strong> ${escapeHtml(member.plan_age_min)}${member.plan_age_max === null ? "+" : `-${escapeHtml(member.plan_age_max)}`}</p>
               <p><strong>Duration:</strong> ${escapeHtml({ daily: "One day", monthly: "Monthly", annual: "Annual" }[member.plan_duration_type] || "")}</p>
               <p><strong>Valid Until:</strong> ${escapeHtml(new Date(member.expires_at).toLocaleDateString())}</p>
@@ -501,11 +539,15 @@
       async function loadPlansTable() {
         const tbody = document.getElementById("plansTableBody");
         try {
-          const response = await fetch(`${API_URL}/api/plans`);
+          const response = await fetch(`${API_URL}/api/admin/plans`, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+          });
           const plans = await response.json();
           if (!response.ok) throw new Error("Failed to load plans");
           if (plans.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" style="text-align: center">No plans available.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center">No plans available.</td></tr>';
             return;
           }
 
@@ -513,10 +555,10 @@
             const ageRange = plan.age_max === null ? `${plan.age_min}+` : `${plan.age_min}-${plan.age_max}`;
             const duration = { daily: "One day", monthly: "Monthly", annual: "Annual" }[plan.duration_type] || `${plan.duration_days} days`;
             const price = `₹${Number(plan.price).toFixed(2)}`;
-            return `<tr><td>${escapeHtml(ageRange)}</td><td>${escapeHtml(duration)}</td><td>${escapeHtml(price)}</td></tr>`;
+            return `<tr><td>${escapeHtml(accountTypeLabel(plan.audience))}</td><td>${escapeHtml(ageRange)}</td><td>${escapeHtml(duration)}</td><td>${escapeHtml(price)}</td></tr>`;
           }).join("");
         } catch (error) {
-          tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: red">Unable to load plans.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red">Unable to load plans.</td></tr>';
         }
       }
 
@@ -533,7 +575,7 @@
 
           if (!data || data.length === 0) {
             tbody.innerHTML =
-              '<tr><td colspan="8" style="text-align: center;">No registered users found.</td></tr>';
+              '<tr><td colspan="11" style="text-align: center;">No registered users found.</td></tr>';
             return;
           }
 
@@ -551,7 +593,10 @@
               <td>${escapeHtml(user.name)}</td>
               <td>${escapeHtml(user.email)}</td>
               <td>${escapeHtml(user.phone || "N/A")}</td>
-              <td>${escapeHtml(user.age ?? "N/A")}</td>
+              <td>${escapeHtml(user.date_of_birth ?? "N/A")}</td>
+              <td>${escapeHtml(accountTypeLabel(user.account_type))}</td>
+              <td>${escapeHtml(user.family_count)}</td>
+              <td>${escapeHtml(user.guest_count)}</td>
               <td>${escapeHtml(user.employee_id || "N/A")}</td>
               <td><span class="role-badge ${escapeHtml(user.role)}">${roleLabel}</span></td>
               <td>${escapeHtml(registeredDate)}</td>
@@ -562,7 +607,7 @@
         } catch (err) {
           console.error("Error loading users table:", err);
           document.getElementById("usersTableBody").innerHTML =
-            '<tr><td colspan="8" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
+            '<tr><td colspan="11" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
         }
       }
 
@@ -580,7 +625,7 @@
           if (response.status === 404) {
             // Fallback if endpoint doesn't exist - load from all subscriptions
             document.getElementById("membersTableBody").innerHTML =
-              '<tr><td colspan="8" style="text-align: center; padding: 2rem;">Members data endpoint not yet available. Use QR Scanner to validate entries.</td></tr>';
+              '<tr><td colspan="10" style="text-align: center; padding: 2rem;">Members data endpoint not yet available. Use QR Scanner to validate entries.</td></tr>';
             return;
           }
 
@@ -589,7 +634,7 @@
 
           if (!data || data.length === 0) {
             tbody.innerHTML =
-              '<tr><td colspan="8" style="text-align: center;">No active subscriptions found.</td></tr>';
+              '<tr><td colspan="10" style="text-align: center;">No active subscriptions found.</td></tr>';
             return;
           }
 
@@ -607,8 +652,10 @@
             <tr>
               <td><img src="${escapeHtml(sub.photo_path || "https://via.placeholder.com/50")}" alt="${escapeHtml(sub.member_name)}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;"></td>
               <td>${escapeHtml(sub.member_name)}</td>
-              <td>${escapeHtml(sub.age)}</td>
+              <td>${escapeHtml(participantTypeLabel(sub.member_type))}</td>
+              <td>${escapeHtml(sub.date_of_birth ?? "N/A")}</td>
               <td>${escapeHtml(sub.user_name)}</td>
+              <td>${escapeHtml(accountTypeLabel(sub.account_type))}</td>
               <td>Ages ${escapeHtml(sub.age_min)}${sub.age_max === null ? "+" : `-${escapeHtml(sub.age_max)}`} · ${escapeHtml({ daily: "One day", monthly: "Monthly", annual: "Annual" }[sub.duration_type] || "")}</td>
               <td>${escapeHtml(new Date(sub.start_date).toLocaleDateString())}</td>
               <td>${escapeHtml(expiryDate.toLocaleDateString())}</td>
@@ -620,7 +667,37 @@
         } catch (err) {
           console.error("Error loading members table:", err);
           document.getElementById("membersTableBody").innerHTML =
-            '<tr><td colspan="8" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
+            '<tr><td colspan="10" style="text-align: center; color: red;">Error loading data. Please try again.</td></tr>';
+        }
+      }
+
+      async function downloadSubscriptionsCsv() {
+        const message = document.getElementById("subscriptionExportMessage");
+        message.innerHTML = "";
+
+        try {
+          const response = await fetch(`${API_URL}/api/admin/subscriptions/export`, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+          });
+          if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || "Failed to export subscriptions");
+          }
+
+          const csv = await response.blob();
+          const downloadUrl = URL.createObjectURL(csv);
+          const link = document.createElement("a");
+          link.href = downloadUrl;
+          link.download = "subscriptions-revenue.csv";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+        } catch (error) {
+          console.error("Error exporting subscriptions:", error);
+          message.innerHTML = `<div class="alert alert-error">${escapeHtml(error.message)}</div>`;
         }
       }
 

@@ -11,6 +11,13 @@ const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
 const Razorpay = require("razorpay");
+const {
+  calculateAge,
+  escapeCsvCell,
+  isAddableMemberType,
+  isEligibleForPlan,
+  isPlanForAccount,
+} = require("./public/utils");
 
 const JWT_SECRET = process.env.JWT_SECRET?.trim();
 if (
@@ -181,9 +188,10 @@ const verifyToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await db.get("SELECT id, role FROM Users WHERE id = $1", [
-      decoded.id,
-    ]);
+    const user = await db.get(
+      "SELECT id, role, account_type FROM Users WHERE id = $1",
+      [decoded.id],
+    );
     if (!user || user.role === "disabled") {
       return res.status(401).json({ error: "Invalid or expired token" });
     }
@@ -202,20 +210,18 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
-const isEligibleForPlan = (age, plan) =>
-  age >= plan.age_min && (plan.age_max === null || age <= plan.age_max);
-
 // ============ AUTHENTICATION ROUTES ============
 
-// Register
-app.post("/api/register", receivePhoto, storeVerifiedPhoto, async (req, res) => {
+const registerAccount = (accountType) => async (req, res) => {
   try {
     const { password, confirmPassword, phone, employee_id } = req.body;
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
     const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
-    const ageInput = req.body.age;
-    const age = Number(ageInput);
-    const employeeId = typeof employee_id === "string" ? employee_id.trim() : "";
+    const dateOfBirth = req.body.date_of_birth;
+    const age = calculateAge(dateOfBirth);
+    const employeeId = accountType === "faculty" && typeof employee_id === "string"
+      ? employee_id.trim()
+      : null;
     const photoPath = req.file ? `/uploads/${req.file.filename}` : null;
 
     if (
@@ -224,13 +230,12 @@ app.post("/api/register", receivePhoto, storeVerifiedPhoto, async (req, res) => 
       !password ||
       !confirmPassword ||
       !phone ||
-      ageInput === undefined ||
-      ageInput === "" ||
-      !employeeId
+      !dateOfBirth ||
+      (accountType === "faculty" && !employeeId)
     ) {
       return res
         .status(400)
-        .json({ error: "All registration fields are required" });
+        .json({ error: "All required registration fields must be provided" });
     }
 
     if (password !== confirmPassword) {
@@ -245,11 +250,10 @@ app.post("/api/register", receivePhoto, storeVerifiedPhoto, async (req, res) => 
       return res.status(400).json({ error: "Enter a valid email address" });
     }
 
-    if (!Number.isInteger(age) || age < 0 || age > 120) {
-      return res.status(400).json({ error: "Enter a valid age" });
+    if (age === null || age > 120) {
+      return res.status(400).json({ error: "Enter a valid date of birth" });
     }
 
-    // Check if user already exists
     const existing = await db.get("SELECT id FROM Users WHERE email = $1", [
       email,
     ]);
@@ -260,14 +264,30 @@ app.post("/api/register", receivePhoto, storeVerifiedPhoto, async (req, res) => 
     const hashedPassword = bcrypt.hashSync(password, 10);
     const user = await db.transaction(async (client) => {
       const result = await client.query(
-        "INSERT INTO Users (name, email, password_hash, phone, age, employee_id, photo_path, role) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, name, email, age, employee_id, role",
-        [name, email, hashedPassword, phone, age, employeeId, photoPath, "member"],
+        "INSERT INTO Users (name, email, password_hash, phone, date_of_birth, employee_id, account_type, photo_path, role) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, name, email, date_of_birth, employee_id, account_type, role",
+        [
+          name,
+          email,
+          hashedPassword,
+          phone,
+          dateOfBirth,
+          employeeId,
+          accountType,
+          photoPath,
+          "member",
+        ],
       );
       const newUser = result.rows[0];
 
       await client.query(
-        "INSERT INTO FamilyMembers (user_id, name, age, photo_path) VALUES ($1, $2, $3, $4)",
-        [newUser.id, newUser.name, newUser.age, photoPath],
+        "INSERT INTO Members (user_id, name, date_of_birth, member_type, photo_path) VALUES ($1, $2, $3, $4, $5)",
+        [
+          newUser.id,
+          newUser.name,
+          newUser.date_of_birth,
+          accountType === "outside" ? "outside" : "employee",
+          photoPath,
+        ],
       );
 
       return newUser;
@@ -282,7 +302,20 @@ app.post("/api/register", receivePhoto, storeVerifiedPhoto, async (req, res) => 
     console.error(err);
     res.status(500).json({ error: "Registration failed" });
   }
-});
+};
+
+app.post(
+  "/api/register",
+  receivePhoto,
+  storeVerifiedPhoto,
+  registerAccount("faculty"),
+);
+app.post(
+  "/api/register/outside",
+  receivePhoto,
+  storeVerifiedPhoto,
+  registerAccount("outside"),
+);
 
 // Login
 const loginLimiter = rateLimit({
@@ -306,7 +339,7 @@ app.post("/api/login", loginLimiter, async (req, res) => {
     }
 
     const user = await db.get(
-      "SELECT id, name, email, password_hash, role FROM Users WHERE LOWER(email) = $1",
+      "SELECT id, name, email, password_hash, role, account_type FROM Users WHERE LOWER(email) = $1",
       [email],
     );
     const passwordMatches = await bcrypt.compare(
@@ -331,6 +364,7 @@ app.post("/api/login", loginLimiter, async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        account_type: user.account_type,
       },
       token,
     });
@@ -340,57 +374,59 @@ app.post("/api/login", loginLimiter, async (req, res) => {
   }
 });
 
-// ============ FAMILY MEMBERS ROUTES ============
+// ============ MEMBER ROUTES ============
 
-// Add family member
+// Add a family member or guest
 app.post(
-  "/api/family-members",
+  "/api/members",
   verifyToken,
   receivePhoto,
   storeVerifiedPhoto,
   async (req, res) => {
     try {
-      const { name } = req.body;
-      const age = Number(req.body.age);
+      const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+      const dateOfBirth = req.body.date_of_birth;
+      const memberType = req.body.member_type;
+      const age = calculateAge(dateOfBirth);
       const photoPath = req.file ? `/uploads/${req.file.filename}` : null;
       const userId = req.user.id;
 
-      if (!name || req.body.age === undefined || req.body.age === "" || !Number.isInteger(age) || age < 0 || age > 120) {
+      if (!name || age === null || age > 120 || !isAddableMemberType(memberType)) {
         return res
           .status(400)
-          .json({ error: "Name and a valid age are required" });
+          .json({ error: "Enter a name, valid date of birth, and member type (family or guest)" });
       }
 
       const result = await db.run(
-        "INSERT INTO FamilyMembers (user_id, name, age, photo_path) VALUES ($1, $2, $3, $4) RETURNING id",
-        [userId, name, age, photoPath],
+        "INSERT INTO Members (user_id, name, date_of_birth, member_type, photo_path) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        [userId, name, dateOfBirth, memberType, photoPath],
       );
 
       const member = await db.get(
-        "SELECT id, name, age, photo_path FROM FamilyMembers WHERE id = $1",
+        "SELECT id, name, date_of_birth, member_type, photo_path FROM Members WHERE id = $1",
         [result.lastID],
       );
 
-      res.json({ message: "Family member added successfully", member });
+      res.json({ message: "Member added successfully", member });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: "Failed to add family member" });
+      res.status(500).json({ error: "Failed to add member" });
     }
   },
 );
 
-// Get my family members
-app.get("/api/family-members", verifyToken, async (req, res) => {
+// Get my employees, family members, and guests
+app.get("/api/members", verifyToken, async (req, res) => {
   try {
     const members = await db.all(
-      "SELECT id, name, age, photo_path FROM FamilyMembers WHERE user_id = $1",
+      "SELECT id, name, date_of_birth, member_type, photo_path FROM Members WHERE user_id = $1 ORDER BY CASE member_type WHEN 'employee' THEN 0 WHEN 'family' THEN 1 ELSE 2 END, name",
       [req.user.id],
     );
 
     res.json(members);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch family members" });
+    res.status(500).json({ error: "Failed to fetch members" });
   }
 });
 
@@ -400,7 +436,20 @@ app.get("/api/family-members", verifyToken, async (req, res) => {
 app.get("/api/plans", async (req, res) => {
   try {
     const plans = await db.all(
-      "SELECT id, duration_days, age_min, age_max, duration_type, price FROM Plans WHERE is_active = 1 ORDER BY duration_days, age_min, id",
+      "SELECT id, duration_days, age_min, age_max, duration_type, price, audience FROM Plans WHERE is_active = 1 ORDER BY audience, duration_days, age_min, id",
+    );
+    res.json(plans);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch plans" });
+  }
+});
+
+app.get("/api/my-plans", verifyToken, async (req, res) => {
+  try {
+    const plans = await db.all(
+      "SELECT id, duration_days, age_min, age_max, duration_type, price, audience FROM Plans WHERE is_active = 1 AND audience = $1 ORDER BY duration_days, age_min, id",
+      [req.user.account_type],
     );
     res.json(plans);
   } catch (err) {
@@ -421,22 +470,22 @@ app.get("/api/razorpay-key", (req, res) => {
 // Create Razorpay order
 app.post("/api/create-order", verifyToken, async (req, res) => {
   try {
-    const { family_member_id, plan_id } = req.body;
+    const { member_id, plan_id } = req.body;
 
-    if (!family_member_id || !plan_id) {
+    if (!member_id || !plan_id) {
       return res
         .status(400)
-        .json({ error: "Family member and plan are required" });
+        .json({ error: "Member and plan are required" });
     }
 
-    // Get family member
+    // Get selected member
     const member = await db.get(
-      "SELECT name, age, user_id FROM FamilyMembers WHERE id = $1",
-      [family_member_id],
+      "SELECT name, date_of_birth, member_type, user_id FROM Members WHERE id = $1",
+      [member_id],
     );
 
     if (!member) {
-      return res.status(404).json({ error: "Family member not found" });
+      return res.status(404).json({ error: "Member not found" });
     }
 
     if (member.user_id !== req.user.id) {
@@ -445,7 +494,7 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
 
     // Get plan
     const plan = await db.get(
-      "SELECT id, duration_days, age_min, age_max, duration_type, price FROM Plans WHERE id = $1 AND is_active = 1",
+      "SELECT id, duration_days, age_min, age_max, duration_type, price, audience FROM Plans WHERE id = $1 AND is_active = 1",
       [plan_id],
     );
 
@@ -453,8 +502,11 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
       return res.status(404).json({ error: "Plan not found" });
     }
 
-    const age = member.age;
-    if (!isEligibleForPlan(age, plan)) {
+    if (!isPlanForAccount(plan, req.user.account_type)) {
+      return res.status(403).json({ error: "This plan is not available for your account type" });
+    }
+
+    if (!isEligibleForPlan(member.date_of_birth, plan)) {
       return res.status(400).json({
         error: `This plan is available for ages ${plan.age_min}${plan.age_max === null ? "+" : `-${plan.age_max}`} only`,
       });
@@ -487,7 +539,8 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
           currency: "INR",
           receipt: `order_${Date.now()}`,
           notes: {
-            family_member_id,
+            member_id,
+            member_type: member.member_type,
             plan_id,
             user_id: req.user.id,
           },
@@ -507,8 +560,8 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
     }
 
     await db.run(
-      "INSERT INTO PaymentOrders (order_id, user_id, family_member_id, plan_id, amount) VALUES ($1, $2, $3, $4, $5)",
-      [order.id, req.user.id, family_member_id, plan_id, Number(price)],
+      "INSERT INTO PaymentOrders (order_id, user_id, member_id, plan_id, amount) VALUES ($1, $2, $3, $4, $5)",
+      [order.id, req.user.id, member_id, plan_id, Number(price)],
     );
 
     res.json({
@@ -516,7 +569,7 @@ app.post("/api/create-order", verifyToken, async (req, res) => {
       amount: price,
       currency: "INR",
       memberName: member.name,
-      age,
+      memberType: member.member_type,
       durationDays: plan.duration_days,
       durationType: plan.duration_type,
     });
@@ -533,20 +586,20 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
-      family_member_id,
+      member_id,
       plan_id,
     } = req.body;
 
-    if (!razorpay_order_id || !family_member_id || !plan_id) {
+    if (!razorpay_order_id || !member_id || !plan_id) {
       return res.status(400).json({ error: "Payment order, member, and plan are required" });
     }
 
     const paymentOrder = await db.get(
-      "SELECT id, user_id, family_member_id, plan_id, amount, status FROM PaymentOrders WHERE order_id = $1",
+      "SELECT id, user_id, member_id, plan_id, amount, status FROM PaymentOrders WHERE order_id = $1",
       [razorpay_order_id],
     );
     if (!paymentOrder || paymentOrder.user_id !== req.user.id ||
-        paymentOrder.family_member_id !== Number(family_member_id) ||
+        paymentOrder.member_id !== Number(member_id) ||
         paymentOrder.plan_id !== Number(plan_id) || paymentOrder.status !== "created") {
       return res.status(400).json({ error: "Invalid or already processed payment order" });
     }
@@ -574,13 +627,13 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
       console.log("Mock mode: Skipping signature verification");
     }
 
-    // Get family member and plan
+    // Get selected member and plan
     const member = await db.get(
-      "SELECT user_id, age FROM FamilyMembers WHERE id = $1",
-      [family_member_id],
+      "SELECT user_id, date_of_birth, member_type FROM Members WHERE id = $1",
+      [member_id],
     );
     const plan = await db.get(
-      "SELECT duration_days, age_min, age_max, is_active, price FROM Plans WHERE id = $1",
+      "SELECT duration_days, age_min, age_max, is_active, price, audience FROM Plans WHERE id = $1",
       [plan_id],
     );
 
@@ -588,11 +641,15 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
+    if (!isPlanForAccount(plan, req.user.account_type)) {
+      return res.status(403).json({ error: "This plan is not available for your account type" });
+    }
+
     if (Number(paymentOrder.amount) !== Number(plan.price)) {
       return res.status(400).json({ error: "Payment amount no longer matches the selected plan" });
     }
 
-    if (!isEligibleForPlan(member.age, plan)) {
+    if (!isEligibleForPlan(member.date_of_birth, plan)) {
       return res.status(400).json({ error: "Member is not eligible for this plan" });
     }
 
@@ -607,8 +664,8 @@ app.post("/api/verify-payment", verifyToken, async (req, res) => {
     const paymentId = razorpay_payment_id || `mock_${Date.now()}`;
     const subscription = await db.transaction(async (client) => {
       const inserted = await client.query(
-        "INSERT INTO Subscriptions (family_member_id, plan_id, start_date, end_date, payment_id, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-        [family_member_id, plan_id, startDate, endDate, paymentId, "active"],
+        "INSERT INTO Subscriptions (member_id, plan_id, start_date, end_date, payment_id, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+        [member_id, plan_id, startDate, endDate, paymentId, "active"],
       );
       await client.query(
         "UPDATE PaymentOrders SET status = 'paid', payment_id = $1 WHERE id = $2",
@@ -661,17 +718,18 @@ app.get("/api/my-qrcodes", verifyToken, async (req, res) => {
         q.is_valid,
         s.start_date,
         s.end_date,
-        fm.name as member_name,
-        fm.photo_path,
+        m.name as member_name,
+        m.member_type,
+        m.photo_path,
         p.age_min,
         p.age_max,
         p.duration_type,
         p.duration_days
       FROM QRCodes q
       JOIN Subscriptions s ON q.subscription_id = s.id
-      JOIN FamilyMembers fm ON s.family_member_id = fm.id
+      JOIN Members m ON s.member_id = m.id
       JOIN Plans p ON s.plan_id = p.id
-      WHERE fm.user_id = $1 AND s.status = 'active'
+      WHERE m.user_id = $1 AND s.status = 'active'
       ORDER BY q.created_at DESC
     `,
       [req.user.id],
@@ -697,9 +755,21 @@ app.get("/api/my-qrcodes", verifyToken, async (req, res) => {
 
 // ============ ADMIN ROUTES ============
 
+app.get("/api/admin/plans", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const plans = await db.all(
+      "SELECT id, duration_days, age_min, age_max, duration_type, price, audience, is_active FROM Plans ORDER BY audience, duration_days, age_min, id",
+    );
+    res.json(plans);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch plans" });
+  }
+});
+
 app.post("/api/admin/plans", verifyToken, verifyAdmin, async (req, res) => {
   try {
-    const { age_min, age_max, duration_type, price } = req.body;
+    const { age_min, age_max, duration_type, price, audience } = req.body;
     const minimumAge = Number(age_min);
     const maximumAge = age_max === "" || age_max === null ? null : Number(age_max);
     const planPrice = Number(price);
@@ -712,23 +782,25 @@ app.post("/api/admin/plans", verifyToken, verifyAdmin, async (req, res) => {
         (!Number.isInteger(maximumAge) || maximumAge < minimumAge)) ||
       !durationDays ||
       !Number.isFinite(planPrice) ||
-      planPrice <= 0
+      planPrice <= 0 ||
+      !["faculty", "outside"].includes(audience)
     ) {
-      return res.status(400).json({ error: "Enter a valid age range, term, and price" });
+      return res.status(400).json({ error: "Enter a valid audience, age range, term, and price" });
     }
 
     const result = await db.run(
-      "INSERT INTO Plans (duration_days, age_min, age_max, duration_type, price) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+      "INSERT INTO Plans (duration_days, age_min, age_max, duration_type, price, audience) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
       [
         durationDays,
         minimumAge,
         maximumAge,
         duration_type,
         planPrice,
+        audience,
       ],
     );
     const plan = await db.get(
-      "SELECT id, age_min, age_max, duration_type, duration_days, price FROM Plans WHERE id = $1",
+      "SELECT id, age_min, age_max, duration_type, duration_days, price, audience FROM Plans WHERE id = $1",
       [result.lastID],
     );
     res.status(201).json(plan);
@@ -747,16 +819,18 @@ app.get("/api/admin/users", verifyToken, verifyAdmin, async (req, res) => {
         u.name,
         u.email,
         u.phone,
-        u.age,
+        u.date_of_birth,
         u.employee_id,
+        u.account_type,
         u.photo_path,
         u.role,
         u.created_at,
-        COUNT(DISTINCT fm.id) as family_count,
+        COUNT(DISTINCT m.id) FILTER (WHERE m.member_type = 'family') as family_count,
+        COUNT(DISTINCT m.id) FILTER (WHERE m.member_type = 'guest') as guest_count,
         COUNT(DISTINCT s.id) as subscription_count
       FROM Users u
-      LEFT JOIN FamilyMembers fm ON u.id = fm.user_id
-      LEFT JOIN Subscriptions s ON fm.id = s.family_member_id AND s.status = 'active'
+      LEFT JOIN Members m ON u.id = m.user_id
+      LEFT JOIN Subscriptions s ON m.id = s.member_id AND s.status = 'active'
       WHERE u.role = 'member'
       GROUP BY u.id
       ORDER BY u.created_at DESC
@@ -778,13 +852,15 @@ app.get(
     try {
       const data = await db.all(`
       SELECT 
-        fm.id,
-        fm.name as member_name,
-        fm.age,
-        fm.photo_path,
+        m.id,
+        m.name as member_name,
+        m.date_of_birth,
+        m.member_type,
+        m.photo_path,
         u.id as user_id,
         u.name as user_name,
         u.email,
+        u.account_type,
         s.id as subscription_id,
         p.id as plan_id,
         p.age_min,
@@ -794,8 +870,8 @@ app.get(
         s.end_date as expires_at,
         s.status
       FROM Subscriptions s
-      INNER JOIN FamilyMembers fm ON s.family_member_id = fm.id
-      INNER JOIN Users u ON fm.user_id = u.id
+      INNER JOIN Members m ON s.member_id = m.id
+      INNER JOIN Users u ON m.user_id = u.id
       INNER JOIN Plans p ON s.plan_id = p.id
       WHERE s.status = 'active'
       ORDER BY s.start_date DESC
@@ -808,6 +884,108 @@ app.get(
     }
   },
 );
+
+app.get("/api/admin/subscriptions/export", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const subscriptions = await db.all(`
+      SELECT
+        s.id AS subscription_id,
+        m.name AS member_name,
+        m.member_type,
+        m.date_of_birth,
+        u.name AS account_name,
+        u.email AS account_email,
+        u.employee_id,
+        u.account_type,
+        p.id AS plan_id,
+        p.audience AS plan_audience,
+        p.duration_type,
+        p.duration_days,
+        p.age_min,
+        p.age_max,
+        p.price AS plan_price,
+        CASE WHEN po.status = 'paid' THEN po.amount END AS paid_amount,
+        COALESCE(po.status, 'not found') AS payment_status,
+        COALESCE(s.payment_id, '') AS payment_id,
+        s.start_date,
+        s.end_date,
+        s.status AS subscription_status,
+        to_char(
+          s.created_at AT TIME ZONE 'UTC',
+          'YYYY-MM-DD"T"HH24:MI:SS"Z"'
+        ) AS subscription_created_at
+      FROM Subscriptions s
+      INNER JOIN Members m ON s.member_id = m.id
+      INNER JOIN Users u ON m.user_id = u.id
+      INNER JOIN Plans p ON s.plan_id = p.id
+      LEFT JOIN PaymentOrders po ON po.payment_id = s.payment_id
+      ORDER BY s.created_at DESC, s.id DESC
+    `);
+
+    const headers = [
+      "Subscription ID",
+      "Member Name",
+      "Member Type",
+      "Date of Birth",
+      "Account Name",
+      "Account Email",
+      "Employee ID",
+      "Account Type",
+      "Plan ID",
+      "Plan Audience",
+      "Plan Duration",
+      "Plan Duration Days",
+      "Minimum Eligible Age",
+      "Maximum Eligible Age",
+      "Plan Price (INR)",
+      "Paid Amount (INR)",
+      "Payment Status",
+      "Payment ID",
+      "Start Date",
+      "End Date",
+      "Subscription Status",
+      "Subscription Created At",
+    ];
+    const rows = subscriptions.map((subscription) => [
+      subscription.subscription_id,
+      subscription.member_name,
+      subscription.member_type,
+      subscription.date_of_birth,
+      subscription.account_name,
+      subscription.account_email,
+      subscription.employee_id,
+      subscription.account_type,
+      subscription.plan_id,
+      subscription.plan_audience,
+      subscription.duration_type,
+      subscription.duration_days,
+      subscription.age_min,
+      subscription.age_max,
+      subscription.plan_price,
+      subscription.paid_amount,
+      subscription.payment_status,
+      subscription.payment_id,
+      subscription.start_date,
+      subscription.end_date,
+      subscription.subscription_status,
+      subscription.subscription_created_at,
+    ]);
+    const csv = [headers, ...rows]
+      .map((row) => row.map(escapeCsvCell).join(","))
+      .join("\r\n");
+
+    res
+      .set({
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="subscriptions-revenue.csv"',
+        "Cache-Control": "no-store",
+      })
+      .send(`\uFEFF${csv}`);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to export subscriptions" });
+  }
+});
 
 // Validate QR code (admin)
 app.post("/api/qr/validate", verifyToken, verifyAdmin, async (req, res) => {
@@ -825,15 +1003,16 @@ app.post("/api/qr/validate", verifyToken, verifyAdmin, async (req, res) => {
         q.is_valid,
         q.expires_at,
         s.id as subscription_id,
-        fm.name as member_name,
-        fm.photo_path,
-        fm.age,
+        m.name as member_name,
+        m.member_type,
+        m.photo_path,
+        m.date_of_birth,
         p.age_min,
         p.age_max,
         p.duration_type
       FROM QRCodes q
       JOIN Subscriptions s ON q.subscription_id = s.id
-      JOIN FamilyMembers fm ON s.family_member_id = fm.id
+      JOIN Members m ON s.member_id = m.id
       JOIN Plans p ON s.plan_id = p.id
       WHERE q.token = $1
     `,
@@ -863,8 +1042,9 @@ app.post("/api/qr/validate", verifyToken, verifyAdmin, async (req, res) => {
       valid: true,
       member: {
         name: qr.member_name,
+        member_type: qr.member_type,
         photo_path: qr.photo_path,
-        age: qr.age,
+        date_of_birth: qr.date_of_birth,
         plan_age_min: qr.age_min,
         plan_age_max: qr.age_max,
         plan_duration_type: qr.duration_type,

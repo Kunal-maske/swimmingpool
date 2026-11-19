@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Outside Member Registration - IITGN Swimming Pool</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-account-type="outside">
+    <nav class="navbar">
+      <div class="container">
+        <div class="logo">IITGN Swimming Pool</div>
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="login.html" class="btn btn-primary">Login</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <main>
+      <div class="auth-container">
+        <div class="auth-box">
+          <h1>Outside Member Registration</h1>
+          <p>Register without a faculty employee ID. You can add family members after signing in.</p>
+          <form id="registerForm">
+            <div class="form-group">
+              <label for="name">Full Name</label>
+              <input type="text" id="name" name="name" required />
+            </div>
+
+            <div class="form-group">
+              <label for="email">Email</label>
+              <input type="email" id="email" name="email" required />
+            </div>
+
+            <div class="form-group">
+              <label for="dateOfBirth">Date of birth</label>
+              <input type="date" id="dateOfBirth" name="date_of_birth" required />
+            </div>
+
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input type="password" id="password" name="password" autocomplete="new-password" required />
+            </div>
+
+            <div class="form-group">
+              <label for="confirmPassword">Confirm Password</label>
+              <input type="password" id="confirmPassword" name="confirmPassword" autocomplete="new-password" required />
+            </div>
+
+            <div class="form-group">
+              <label for="phone">Phone Number</label>
+              <input type="tel" id="phone" name="phone" required />
+            </div>
+
+            <div class="form-group">
+              <label for="photo">Profile Photo</label>
+              <input type="file" id="photo" name="photo" accept="image/*" />
+              <div id="photoPreview" class="photo-preview"></div>
+            </div>
+
+            <button type="submit" class="btn btn-success btn-block">Register</button>
+            <p class="auth-link">
+              Already have an account? <a href="login.html">Login here</a>
+            </p>
+          </form>
+
+          <div id="message" class="message"></div>
+        </div>
+      </div>
+    </main>
+
+    <script src="utils.js"></script>
+    <script src="register.js"></script>
+  </body>
+</html>

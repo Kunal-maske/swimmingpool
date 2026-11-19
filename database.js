@@ -1,10 +1,18 @@
-const { Pool } = require("pg");
+const { Pool, types } = require("pg");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
 class Database {
   constructor(connectionString) {
-    this.pool = new Pool({ connectionString });
+    this.pool = new Pool({
+      connectionString,
+      types: {
+        getTypeParser: (oid, format) =>
+          oid === types.builtins.DATE && format === "text"
+            ? (value) => value
+            : types.getTypeParser(oid, format),
+      },
+    });
     this.pool.on("error", (error) => {
       console.error("Unexpected PostgreSQL pool error:", error);
     });
@@ -56,42 +64,72 @@ class Database {
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         phone TEXT,
-        age INTEGER,
+        date_of_birth DATE,
         employee_id TEXT,
+        account_type TEXT NOT NULL DEFAULT 'faculty'
+          CHECK (account_type IN ('faculty', 'outside')),
         photo_path TEXT,
         role TEXT DEFAULT 'member',
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
 
-      ALTER TABLE Users ADD COLUMN IF NOT EXISTS age INTEGER;
+      ALTER TABLE Users ADD COLUMN IF NOT EXISTS date_of_birth DATE;
       ALTER TABLE Users ADD COLUMN IF NOT EXISTS employee_id TEXT;
+      ALTER TABLE Users ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'faculty'
+        CHECK (account_type IN ('faculty', 'outside'));
+      ALTER TABLE Users DROP COLUMN IF EXISTS age;
 
-      CREATE TABLE IF NOT EXISTS FamilyMembers (
+      DO $$
+      BEGIN
+        IF to_regclass('members') IS NULL AND to_regclass('familymembers') IS NOT NULL THEN
+          ALTER TABLE FamilyMembers RENAME TO Members;
+        END IF;
+      END $$;
+
+      CREATE TABLE IF NOT EXISTS Members (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL,
         name TEXT NOT NULL,
-        age INTEGER NOT NULL,
+        date_of_birth DATE NOT NULL,
+        member_type TEXT NOT NULL CHECK (member_type IN ('employee', 'family', 'guest')),
         photo_path TEXT,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES Users(id)
       );
 
-      ALTER TABLE FamilyMembers ADD COLUMN IF NOT EXISTS age INTEGER;
-
+      ALTER TABLE Members ADD COLUMN IF NOT EXISTS date_of_birth DATE;
+      ALTER TABLE Members ADD COLUMN IF NOT EXISTS member_type TEXT NOT NULL DEFAULT 'family'
+        CHECK (member_type IN ('employee', 'family', 'guest'));
+      ALTER TABLE Members DROP COLUMN IF EXISTS age;
       DO $$
+      DECLARE
+        member_type_constraint TEXT;
       BEGIN
-        IF EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_schema = current_schema()
-            AND table_name = 'familymembers'
-            AND column_name = 'date_of_birth'
-        ) THEN
-          EXECUTE 'UPDATE FamilyMembers SET age = EXTRACT(YEAR FROM AGE(CURRENT_DATE, date_of_birth))::INTEGER WHERE age IS NULL';
-        END IF;
+        FOR member_type_constraint IN
+          SELECT conname
+          FROM pg_constraint
+          WHERE conrelid = 'members'::regclass
+            AND contype = 'c'
+            AND pg_get_constraintdef(oid) LIKE '%member_type%'
+        LOOP
+          EXECUTE format('ALTER TABLE Members DROP CONSTRAINT %I', member_type_constraint);
+        END LOOP;
       END $$;
-
-      ALTER TABLE FamilyMembers ALTER COLUMN age SET NOT NULL;
-      ALTER TABLE FamilyMembers DROP COLUMN IF EXISTS date_of_birth;
+      ALTER TABLE Members ADD CONSTRAINT members_member_type_check
+        CHECK (member_type IN ('employee', 'outside', 'family', 'guest'));
+      UPDATE Members m
+      SET member_type = 'employee'
+      FROM Users u
+      WHERE m.user_id = u.id
+        AND u.role = 'member'
+        AND m.member_type = 'family'
+        AND m.id = (
+          SELECT id
+          FROM Members first_member
+          WHERE first_member.user_id = u.id
+          ORDER BY first_member.created_at, first_member.id
+          LIMIT 1
+        );
 
       CREATE TABLE IF NOT EXISTS Plans (
         id SERIAL PRIMARY KEY,
@@ -100,21 +138,43 @@ class Database {
         age_max INTEGER,
         duration_type TEXT NOT NULL DEFAULT 'daily',
         price NUMERIC(12, 2) NOT NULL,
+        audience TEXT NOT NULL DEFAULT 'faculty'
+          CHECK (audience IN ('faculty', 'outside')),
         is_active INTEGER NOT NULL DEFAULT 1
       );
 
+      ALTER TABLE Plans ADD COLUMN IF NOT EXISTS audience TEXT NOT NULL DEFAULT 'faculty'
+        CHECK (audience IN ('faculty', 'outside'));
+
       CREATE TABLE IF NOT EXISTS Subscriptions (
         id SERIAL PRIMARY KEY,
-        family_member_id INTEGER NOT NULL,
+        member_id INTEGER NOT NULL,
         plan_id INTEGER NOT NULL,
         start_date DATE NOT NULL,
         end_date DATE NOT NULL,
         payment_id TEXT,
         status TEXT DEFAULT 'active',
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (family_member_id) REFERENCES FamilyMembers(id),
+        FOREIGN KEY (member_id) REFERENCES Members(id),
         FOREIGN KEY (plan_id) REFERENCES Plans(id)
       );
+
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'subscriptions'
+            AND column_name = 'family_member_id'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'subscriptions'
+            AND column_name = 'member_id'
+        ) THEN
+          ALTER TABLE Subscriptions RENAME COLUMN family_member_id TO member_id;
+        END IF;
+      END $$;
 
       CREATE TABLE IF NOT EXISTS QRCodes (
         id SERIAL PRIMARY KEY,
@@ -130,13 +190,30 @@ class Database {
         id SERIAL PRIMARY KEY,
         order_id TEXT UNIQUE NOT NULL,
         user_id INTEGER NOT NULL REFERENCES Users(id),
-        family_member_id INTEGER NOT NULL REFERENCES FamilyMembers(id),
+        member_id INTEGER NOT NULL REFERENCES Members(id),
         plan_id INTEGER NOT NULL REFERENCES Plans(id),
         amount NUMERIC(12, 2) NOT NULL,
         status TEXT NOT NULL DEFAULT 'created',
         payment_id TEXT UNIQUE,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
+
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'paymentorders'
+            AND column_name = 'family_member_id'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'paymentorders'
+            AND column_name = 'member_id'
+        ) THEN
+          ALTER TABLE PaymentOrders RENAME COLUMN family_member_id TO member_id;
+        END IF;
+      END $$;
     `);
 
     const demoAdmin = await this.get(

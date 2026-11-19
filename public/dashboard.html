@@ -22,33 +22,41 @@
     <div class="container">
       <h1>Dashboard</h1>
 
-      <!-- Section 1: Family Members -->
+      <!-- Section 1: Members -->
       <section class="card">
-        <h2>Family Members</h2>
-        <button class="btn btn-primary" onclick="toggleAddMember()">+ Add Family Member</button>
+        <h2>People</h2>
+        <button class="btn btn-primary" onclick="toggleAddMember()">+ Add Person</button>
 
         <div id="addMemberForm" class="form-section hidden">
-          <form id="familyForm">
+          <form id="memberForm">
             <div class="form-row">
+              <div class="form-group">
+                <label for="memberType">Who are you adding?</label>
+                <select id="memberType" name="member_type" required>
+                  <option value="">-- Choose a type --</option>
+                  <option value="family">Family member</option>
+                  <option value="guest">Guest</option>
+                </select>
+              </div>
               <div class="form-group">
                 <label for="memberName">Name</label>
                 <input type="text" id="memberName" required>
               </div>
               <div class="form-group">
-                <label for="memberAge">Age</label>
-                <input type="number" id="memberAge" min="0" max="120" step="1" required>
+                <label for="memberDateOfBirth">Date of birth</label>
+                <input type="date" id="memberDateOfBirth" required>
               </div>
               <div class="form-group">
                 <label for="memberPhoto">Photo</label>
                 <input type="file" id="memberPhoto" accept="image/*">
               </div>
-              <button type="submit" class="btn btn-success">Add Member</button>
+              <button type="submit" class="btn btn-success">Add Person</button>
             </div>
           </form>
           <div id="memberMessage" class="message"></div>
         </div>
 
-        <div id="familyList" class="family-list"></div>
+        <div id="membersList" class="family-list"></div>
       </section>
 
       <!-- Section 2: Subscribe to Plans -->
@@ -57,7 +65,7 @@
         <div class="subscribe-form">
           <div class="form-row">
             <div class="form-group">
-              <label for="selectMember">Select Family Member</label>
+              <label for="selectMember">Select person</label>
               <select id="selectMember" required>
                 <option value="">-- Choose a member --</option>
               </select>
@@ -92,8 +100,7 @@
     const API_URL = '';
     let selectedMemberId = null;
     let selectedPlanId = null;
-    let memberAge = 0;
-    let familyMembers = [];
+    let members = [];
     let availablePlans = [];
 
     // Check authentication
@@ -102,15 +109,16 @@
     }
 
     const user = JSON.parse(localStorage.getItem('user'));
-    document.querySelector('.user-name').textContent = `${user.name}`;
+    document.querySelector('.user-name').textContent = `${user.name} · ${accountTypeLabel(user.account_type || 'faculty')}`;
+    document.getElementById('memberDateOfBirth').max = new Date().toISOString().slice(0, 10);
 
-    // Load family members and plans on page load
-    loadFamilyMembers();
+    // Load members and plans on page load
+    loadMembers();
     loadPlans();
     loadQRCodes();
 
     // Event listeners
-    document.getElementById('familyForm').addEventListener('submit', addFamilyMember);
+    document.getElementById('memberForm').addEventListener('submit', addMember);
     document.getElementById('selectMember').addEventListener('change', () => {
       renderPlanOptions();
       calculatePrice();
@@ -127,55 +135,57 @@
       form.classList.toggle('hidden');
     }
 
-    async function loadFamilyMembers() {
+    async function loadMembers() {
       try {
-        const response = await fetch(`${API_URL}/api/family-members`, {
+        const response = await fetch(`${API_URL}/api/members`, {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
         });
 
-        const members = await response.json();
-        familyMembers = members;
+        const participants = await response.json();
+        members = participants;
         
         // Populate dropdown
         const select = document.getElementById('selectMember');
         select.innerHTML = '<option value="">-- Choose a member --</option>';
-        members.forEach(member => {
+        participants.forEach(member => {
           const option = document.createElement('option');
           option.value = member.id;
-          option.textContent = `${member.name} (${member.age} yrs)`;
+          option.textContent = `${member.name} (${participantTypeLabel(member.member_type)} · DOB: ${member.date_of_birth || 'N/A'})`;
           select.appendChild(option);
         });
 
         // Display family list
-        const familyList = document.getElementById('familyList');
-        familyList.innerHTML = members.map(member => `
+        const membersList = document.getElementById('membersList');
+        membersList.innerHTML = participants.map(member => `
           <div class="family-card">
             <img src="${escapeHtml(member.photo_path || 'https://via.placeholder.com/100')}" alt="${escapeHtml(member.name)}">
             <h3>${escapeHtml(member.name)}</h3>
-            <p>Age: ${escapeHtml(member.age)} years</p>
+            <span class="member-type-badge">${escapeHtml(participantTypeLabel(member.member_type))}</span>
+            <p>Date of birth: ${escapeHtml(member.date_of_birth || 'N/A')}</p>
           </div>
         `).join('');
 
-        if (members.length === 0) {
-          familyList.innerHTML = '<p class="empty-state">No family members added. Add one to get started!</p>';
+        if (participants.length === 0) {
+          membersList.innerHTML = '<p class="empty-state">No people added yet. Add a family member or guest to get started!</p>';
         }
       } catch (err) {
         console.error(err);
       }
     }
 
-    async function addFamilyMember(e) {
+    async function addMember(e) {
       e.preventDefault();
 
       const formData = new FormData();
+      formData.append('member_type', document.getElementById('memberType').value);
       formData.append('name', document.getElementById('memberName').value);
-      formData.append('age', document.getElementById('memberAge').value);
+      formData.append('date_of_birth', document.getElementById('memberDateOfBirth').value);
       if (document.getElementById('memberPhoto').files[0]) {
         formData.append('photo', document.getElementById('memberPhoto').files[0]);
       }
 
       try {
-        const response = await fetch(`${API_URL}/api/family-members`, {
+        const response = await fetch(`${API_URL}/api/members`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
           body: formData
@@ -184,10 +194,10 @@
         const data = await response.json();
 
         if (response.ok) {
-          document.getElementById('memberMessage').innerHTML = '<div class="alert alert-success">Family member added successfully!</div>';
-          document.getElementById('familyForm').reset();
+          document.getElementById('memberMessage').innerHTML = `<div class="alert alert-success">${escapeHtml(participantTypeLabel(data.member.member_type))} added successfully!</div>`;
+          document.getElementById('memberForm').reset();
           toggleAddMember();
-          loadFamilyMembers();
+          loadMembers();
           setTimeout(() => {
             document.getElementById('memberMessage').innerHTML = '';
           }, 3000);
@@ -196,14 +206,17 @@
         }
       } catch (err) {
         console.error(err);
-        document.getElementById('memberMessage').innerHTML = '<div class="alert alert-error">Failed to add family member</div>';
+        document.getElementById('memberMessage').innerHTML = '<div class="alert alert-error">Failed to add person</div>';
       }
     }
 
     async function loadPlans() {
       try {
-        const response = await fetch(`${API_URL}/api/plans`);
+        const response = await fetch(`${API_URL}/api/my-plans`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
         availablePlans = await response.json();
+        if (!response.ok) throw new Error(availablePlans.error || 'Failed to load plans');
         renderPlanOptions();
       } catch (err) {
         console.error(err);
@@ -213,19 +226,21 @@
     function renderPlanOptions() {
       const select = document.getElementById('selectPlan');
       const memberId = document.getElementById('selectMember').value;
-      const member = familyMembers.find(item => item.id == memberId);
-      const age = member ? member.age : null;
+      const member = members.find(item => item.id == memberId);
+      const age = member ? calculateAge(member.date_of_birth) : null;
       const eligiblePlans = availablePlans.filter(plan =>
-        age === null || (age >= plan.age_min && (plan.age_max === null || age <= plan.age_max))
+        !member || isEligibleForPlan(member.date_of_birth, plan)
       );
 
       select.innerHTML = '<option value="">-- Choose a plan --</option>';
       if (eligiblePlans.length === 0) {
         const option = document.createElement('option');
         option.disabled = true;
-        option.textContent = age === null
+        option.textContent = !member
           ? 'No active plans available'
-          : `No eligible plans for age ${age}`;
+          : age === null
+            ? 'No eligible plans: member date of birth is invalid'
+            : `No eligible plans for age ${age}`;
         select.appendChild(option);
         return;
       }
@@ -250,12 +265,17 @@
         return;
       }
 
-      const member = familyMembers.find(item => item.id == memberId);
+      const member = members.find(item => item.id == memberId);
       const plan = availablePlans.find(item => item.id == planId);
       if (!member || !plan) return;
 
-      const age = member.age;
-      memberAge = age;
+      if (!isEligibleForPlan(member.date_of_birth, plan)) {
+        document.getElementById('priceDisplay').value = '₹0';
+        selectedMemberId = null;
+        selectedPlanId = null;
+        return;
+      }
+
       selectedMemberId = memberId;
       selectedPlanId = planId;
       document.getElementById('priceDisplay').value = `₹${Number(plan.price).toFixed(2)}`;
@@ -276,7 +296,7 @@
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           },
           body: JSON.stringify({
-            family_member_id: selectedMemberId,
+            member_id: selectedMemberId,
             plan_id: selectedPlanId
           })
         });
@@ -298,7 +318,7 @@
           amount: orderData.amount * 100,
           currency: 'INR',
           name: 'Swimming Pool',
-          description: `${orderData.memberName} - age ${orderData.age}, ${{ daily: 'One day', monthly: 'Monthly', annual: 'Annual' }[orderData.durationType]}`,
+          description: `${participantTypeLabel(orderData.memberType)} ${orderData.memberName} - ${{ daily: 'One day', monthly: 'Monthly', annual: 'Annual' }[orderData.durationType]} membership`,
           order_id: orderData.orderId,
           handler: function(response) {
             verifyPayment(response, selectedMemberId, selectedPlanId);
@@ -329,7 +349,7 @@
             razorpay_order_id: response.razorpay_order_id,
             razorpay_payment_id: response.razorpay_payment_id,
             razorpay_signature: response.razorpay_signature,
-            family_member_id: memberId,
+            member_id: memberId,
             plan_id: planId
           })
         });
@@ -389,6 +409,7 @@
                 <img src="${escapeHtml(qr.member_name && qr.photo_path ? qr.photo_path : 'https://via.placeholder.com/80')}" alt="${escapeHtml(qr.member_name)}" class="member-photo">
                 <div class="member-info">
                   <h3>${escapeHtml(qr.member_name)}</h3>
+                  <p><strong>Type:</strong> ${escapeHtml(participantTypeLabel(qr.member_type))}</p>
                   <p><strong>Age range:</strong> ${escapeHtml(qr.age_min)}${qr.age_max === null ? '+' : `-${escapeHtml(qr.age_max)}`}</p>
                   <p><strong>Duration:</strong> ${escapeHtml({ daily: 'One day', monthly: 'Monthly', annual: 'Annual' }[qr.duration_type] || '')}</p>
                 </div>

@@ -476,6 +476,17 @@ hr {
   margin-bottom: 0.5rem;
 }
 
+.member-type-badge {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(0, 123, 255, 0.1);
+  color: var(--primary-color);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 .family-card p {
   font-size: 0.9rem;
   color: var(--text-light);
